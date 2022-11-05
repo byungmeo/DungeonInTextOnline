@@ -1,6 +1,8 @@
 ﻿#include <hiredis/hiredis.h>
 #include <iostream>
+#include "rapidjson/document.h"
 
+using namespace rapidjson;
 using namespace std;
 
 int main() {
