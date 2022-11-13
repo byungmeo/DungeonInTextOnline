@@ -155,6 +155,8 @@ bool processClient(shared_ptr<Client> client) {
         cout << "[" << activeSock << "] Partial recv " << r << "bytes. " << client->offset << "/" << client->packetLen << endl;
     }
 
+    cout << "받은 데이터 : " << client->packet << endl;
+
     // TODO: JSON 파싱 후 처리
 
     return true;
