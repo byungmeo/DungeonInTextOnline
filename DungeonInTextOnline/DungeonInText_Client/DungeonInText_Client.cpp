@@ -2,6 +2,7 @@
 #include <hiredis/hiredis.h>
 #include <iostream>
 #include "rapidjson/document.h"
+#include <string>
 #include <thread>
 
 #include <WinSock2.h>
@@ -52,10 +53,13 @@ int main() {
 
     // 1초 간격으로 계속 패킷을 보내본다.
     while (true) {
-        // TODO: 명령어 입력 및 전송 구현
+        // 명령어 입력
+        string command;
+        getline(cin, command);
 
-        std::this_thread::sleep_for(std::chrono::seconds(1));
-        int dataLen = rand() % 5001 + 10000;  // 10000 ~ 15000 바이트까지를 랜덤하게 보낸다. 
+        // TODO: 명령어 문자열을 JSON으로 변환
+        
+        int dataLen = command.length() + (size_t)1; // 문자열의 끝을 의미하는 NULL 문자 포함
 
         // 길이를 먼저 보낸다.
         // binary 로 4bytes 를 길이로 encoding 한다.
@@ -72,12 +76,10 @@ int main() {
         }
         std::cout << "Sent length info: " << dataLen << std::endl;
 
-        // send 로 데이터를 보낸다. 여기서는 초기화되지 않은 쓰레기 데이터를 보낸다.
-
-        char data[32768];
+        // send 로 명령어를 보낸다.
         offset = 0;
         while (offset < dataLen) {
-            r = send(sock, data + offset, dataLen - offset, 0);
+            r = send(sock, command.c_str() + offset, dataLen - offset, 0);
             if (r == SOCKET_ERROR) {
                 std::cerr << "send failed with error " << WSAGetLastError() << std::endl;
                 return 1;
