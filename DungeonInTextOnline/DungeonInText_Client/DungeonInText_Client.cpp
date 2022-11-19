@@ -153,6 +153,10 @@ int main() {
             std::cout << "Sent " << r << " bytes" << std::endl;
             offset += r;
         }
+
+        char buf[1000];
+        r = recv(sock, buf, dataLen, 0);
+        std::cout << "데이터 되돌려받음 : " << buf << std::endl;
     }
 
     // Socket 을 닫는다.

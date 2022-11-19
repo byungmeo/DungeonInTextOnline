@@ -158,6 +158,9 @@ bool processClient(shared_ptr<Client> client) {
     cout << "받은 데이터 : " << client->packet << endl;
 
     // TODO: JSON 파싱 후 처리
+    //우선 명령어를 그대로 되돌려 준다
+    r = send(activeSock, client->packet, r, 0);
+    
 
     return true;
 }
