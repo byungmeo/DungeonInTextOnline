@@ -159,8 +159,36 @@ bool processClient(shared_ptr<Client> client) {
 
     // TODO: JSON 파싱 후 처리
     //우선 명령어를 그대로 되돌려 준다
-    r = send(activeSock, client->packet, r, 0);
-    
+    //r = send(activeSock, client->packet, r, 0);
+    string data = client->packet;
+    int dataLen = data.length() + 1; // 문자열의 끝을 의미하는 NULL 문자 포함
+
+    // 길이를 먼저 보낸다.
+    // binary 로 4bytes 를 길이로 encoding 한다.
+    // 이 때 network byte order 로 변환하기 위해서 htonl 을 호출해야된다.
+    int dataLenNetByteOrder = htonl(dataLen);
+    int offset = 0;
+    while (offset < 4) {
+        r = send(activeSock, ((char*)&dataLenNetByteOrder) + offset, 4 - offset, 0);
+        if (r == SOCKET_ERROR) {
+            std::cerr << "failed to send length: " << WSAGetLastError() << std::endl;
+            return false;
+        }
+        offset += r;
+    }
+    std::cout << "Sent length info: " << dataLen << std::endl;
+
+    // send 로 명령어를 보낸다.
+    offset = 0;
+    while (offset < dataLen) {
+        r = send(activeSock, data.c_str() + offset, dataLen - offset, 0);
+        if (r == SOCKET_ERROR) {
+            std::cerr << "send failed with error " << WSAGetLastError() << std::endl;
+            return false;
+        }
+        std::cout << "Sent " << r << " bytes" << std::endl;
+        offset += r;
+    }
 
     return true;
 }

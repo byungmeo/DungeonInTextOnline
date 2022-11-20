@@ -26,9 +26,15 @@ public:
     }
 };
 
+SOCKET sock;
+
 queue<shared_ptr<Message> > msgQueue;
 mutex msgQueueMutex;
 condition_variable msgQueueFilledCv;
+
+queue<shared_ptr<Message> > commandQueue;
+mutex commandQueueMutex;
+condition_variable commandQueueFilledCv;
 
 void messageThreadProc() {
     cout << "Message thread is starting." << endl;
@@ -56,7 +62,144 @@ void messageThreadProc() {
         // TODO: JSON으로 된 메시지를 뜯어서 출력
     }
 
-    cout << "Message thread is quitting." << endl;
+   cout << "Message thread is quitting." << endl;
+}
+
+void socketThreadProc() {
+    cout << "Socket thread is starting." << endl;
+
+    int r;
+
+    while (true) {
+        // JSON으로 변환된 명령어를 입력받음
+        shared_ptr<Message> command;
+        bool hasCommand = false;
+        {
+            unique_lock<mutex> ul(commandQueueMutex);
+            // job queue 에 이벤트가 발생할 때까지 condition variable 을 잡을 것이다.
+            if (!commandQueue.empty()) {
+                // while loop 을 나왔다는 것은 job queue 에 작업이 있다는 것이다.
+                // queue 의 front 를 기억하고 front 를 pop 해서 큐에서 뺀다.
+                command = commandQueue.front();
+                commandQueue.pop();
+                hasCommand = true;
+            }
+        }
+
+        if (hasCommand) {
+            string data = command.get()->contents;
+            int dataLen = data.length() + 1; // 문자열의 끝을 의미하는 NULL 문자 포함
+
+            // 길이를 먼저 보낸다.
+            // binary 로 4bytes 를 길이로 encoding 한다.
+            // 이 때 network byte order 로 변환하기 위해서 htonl 을 호출해야된다.
+            int dataLenNetByteOrder = htonl(dataLen);
+            int offset = 0;
+            while (offset < 4) {
+                r = send(sock, ((char*)&dataLenNetByteOrder) + offset, 4 - offset, 0);
+                if (r == SOCKET_ERROR) {
+                    cerr << "failed to send length: " << WSAGetLastError() << endl;
+                    return;
+                }
+                offset += r;
+            }
+            cout << "Sent length info: " << dataLen << endl;
+
+            // send 로 명령어를 보낸다.
+            offset = 0;
+            while (offset < dataLen) {
+                r = send(sock, data.c_str() + offset, dataLen - offset, 0);
+                if (r == SOCKET_ERROR) {
+                    cerr << "send failed with error " << WSAGetLastError() << endl;
+                    return;
+                }
+                cout << "Sent " << r << " bytes" << endl;
+                offset += r;
+            }
+        }
+
+        fd_set readSet;
+        SOCKET maxSock = -1;
+        FD_ZERO(&readSet);
+        FD_SET(sock, &readSet);
+        maxSock = max(maxSock, sock);
+        
+        struct timeval timeout;
+        timeout.tv_sec = 0;
+        timeout.tv_usec = 100;
+        r = select(maxSock + 1, &readSet, NULL, NULL, &timeout);
+
+        if (r == SOCKET_ERROR) {
+            cerr << "select failed: " << WSAGetLastError() << endl;
+            break;
+        } else if (r == 0) continue;
+
+        char buf[1000];
+        if (FD_ISSET(sock, &readSet)) {
+            bool lenCompleted = false;
+            int packetLen = 0;
+            int offset = 0;
+            while (!lenCompleted) {
+                // 길이 정보를 받기 위해서 4바이트를 읽는다.
+                // network byte order 로 전성되기 때문에 ntohl() 을 호출한다.
+                r = recv(sock, (char*)&(packetLen)+offset, 4 - offset, 0);
+                if (r == SOCKET_ERROR) {
+                    cerr << "recv failed with error " << WSAGetLastError() << endl;
+                    return;
+                } else if (r == 0) {
+                    // 메뉴얼을 보면 recv() 는 소켓이 닫힌 경우 0 을 반환함을 알 수 있다.
+                    // 따라서 r == 0 인 경우도 loop 을 탈출하게 해야된다.
+                    cerr << "Socket closed: " << sock << endl;
+                    return;
+                }
+                offset += r;
+
+                // 완성 못했다면 다음번에 계속 시도할 것이다.
+                if (offset < 4) {
+                    continue;
+                }
+
+                // network byte order 로 전송했었다.
+                // 따라서 이를 host byte order 로 변경한다.
+                int dataLen = ntohl(packetLen);
+                cout << "Received length info: " << dataLen << endl;
+                packetLen = dataLen;
+
+                // 우리는 Client class 안에 packet 길이를 최대 64KB 로 제한하고 있다.
+                // 혹시 우리가 받을 데이터가 이것보다 큰지 확인한다.
+                // 만일 크다면 처리 불가능이므로 오류로 처리한다.
+                if (packetLen > sizeof(buf)) {
+                    cerr << "Too big data: " << packetLen << endl;
+                    return;
+                }
+
+                // 이제 packetLen 을 완성했다고 기록하고 offset 을 초기화해준다.
+                lenCompleted = true;
+                offset = 0;
+            }
+
+            r = recv(sock, buf, packetLen, 0);
+            shared_ptr<Message> msg(new Message(buf));
+            {
+                lock_guard<mutex> lg(msgQueueMutex);
+
+                bool wasEmpty = msgQueue.empty();
+                msgQueue.push(msg);
+
+                // 그리고 worker thread 를 깨워준다.
+                // 무조건 condition variable 을 notify 해도 되는데,
+                // 해당 condition variable 은 queue 에 뭔가가 들어가서 더 이상 빈 큐가 아닐 때 쓰이므로
+                // 여기서는 무의미하게 CV 를 notify하지 않도록 큐의 길이가 0에서 1이 되는 순간 notify 를 하도록 하자.
+                if (wasEmpty) {
+                    msgQueueFilledCv.notify_one();
+                }
+
+                // lock_guard 는 scope 이 벗어날 때 풀릴 것이다.
+            }
+
+        }
+    }
+    cout << "Socket thread is quitting." << endl;
 }
 
 string moveToJson(int x, int y) {
@@ -129,16 +272,16 @@ int main() {
     WSADATA wsaData;
     r = WSAStartup(MAKEWORD(2, 2), &wsaData);
     if (r != NO_ERROR) {
-        std::cerr << "WSAStartup failed with error " << r << std::endl;
+        cerr << "WSAStartup failed with error " << r << endl;
         return 1;
     }
 
     struct sockaddr_in serverAddr;
 
     // TCP socket 을 만든다.
-    SOCKET sock = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+    sock = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
     if (sock == INVALID_SOCKET) {
-        std::cerr << "socket failed with error " << WSAGetLastError() << std::endl;
+        cerr << "socket failed with error " << WSAGetLastError() << endl;
         return 1;
     }
 
@@ -149,85 +292,52 @@ int main() {
     inet_pton(AF_INET, "127.0.0.1", &serverAddr.sin_addr);
     r = connect(sock, (sockaddr*)&serverAddr, sizeof(serverAddr));
     if (r == SOCKET_ERROR) {
-        std::cerr << "connect failed with error " << WSAGetLastError() << std::endl;
+        cerr << "connect failed with error " << WSAGetLastError() << endl;
         return 1;
     }
 
-    // 서버로부터 받은 메시지를 처리하는 Thread
-    thread msgThreaed(messageThreadProc);
+    thread socketThread(socketThreadProc); // 소켓 작업을 처리하는 Thread
+    thread msgThreaed(messageThreadProc); // 서버로부터 받은 메시지를 처리하는 Thread
 
     // TODO: ID 입력 및 전송 구현
     /*
     */
 
     while (true) {
-        // JSON으로 변환된 명령어를 입력받음
         string command;
         command = inputCommandJson();
         if (command.compare("exit") == 0) {
             cout << "Client를 종료 합니다." << endl;
             break;
-        }
-        
-        // TODO: 서버로부터 로그 수신 구현
+        } else {
+            shared_ptr<Message> msg(new Message(command.c_str()));
+            {
+                lock_guard<mutex> lg(commandQueueMutex);
 
-        int dataLen = command.length() + 1; // 문자열의 끝을 의미하는 NULL 문자 포함
+                bool wasEmpty = commandQueue.empty();
+                commandQueue.push(msg);
 
-        // 길이를 먼저 보낸다.
-        // binary 로 4bytes 를 길이로 encoding 한다.
-        // 이 때 network byte order 로 변환하기 위해서 htonl 을 호출해야된다.
-        int dataLenNetByteOrder = htonl(dataLen);
-        int offset = 0;
-        while (offset < 4) {
-            r = send(sock, ((char*)&dataLenNetByteOrder) + offset, 4 - offset, 0);
-            if (r == SOCKET_ERROR) {
-                std::cerr << "failed to send length: " << WSAGetLastError() << std::endl;
-                return 1;
+                // 그리고 worker thread 를 깨워준다.
+                // 무조건 condition variable 을 notify 해도 되는데,
+                // 해당 condition variable 은 queue 에 뭔가가 들어가서 더 이상 빈 큐가 아닐 때 쓰이므로
+                // 여기서는 무의미하게 CV 를 notify하지 않도록 큐의 길이가 0에서 1이 되는 순간 notify 를 하도록 하자.
+                if (wasEmpty) {
+                    commandQueueFilledCv.notify_one();
+                }
+
+                // lock_guard 는 scope 이 벗어날 때 풀릴 것이다.
             }
-            offset += r;
-        }
-        std::cout << "Sent length info: " << dataLen << std::endl;
-
-        // send 로 명령어를 보낸다.
-        offset = 0;
-        while (offset < dataLen) {
-            r = send(sock, command.c_str() + offset, dataLen - offset, 0);
-            if (r == SOCKET_ERROR) {
-                std::cerr << "send failed with error " << WSAGetLastError() << std::endl;
-                return 1;
-            }
-            std::cout << "Sent " << r << " bytes" << std::endl;
-            offset += r;
-        }
-
-        char buf[1000];
-        r = recv(sock, buf, dataLen, 0);
-        shared_ptr<Message> msg(new Message(buf));
-        {
-            lock_guard<mutex> lg(msgQueueMutex);
-
-            bool wasEmpty = msgQueue.empty();
-            msgQueue.push(msg);
-
-            // 그리고 worker thread 를 깨워준다.
-            // 무조건 condition variable 을 notify 해도 되는데,
-            // 해당 condition variable 은 queue 에 뭔가가 들어가서 더 이상 빈 큐가 아닐 때 쓰이므로
-            // 여기서는 무의미하게 CV 를 notify하지 않도록 큐의 길이가 0에서 1이 되는 순간 notify 를 하도록 하자.
-            if (wasEmpty) {
-                msgQueueFilledCv.notify_one();
-            }
-
-            // lock_guard 는 scope 이 벗어날 때 풀릴 것이다.
         }
     }
 
     // join
+    socketThread.join();
     msgThreaed.join();
 
     // Socket 을 닫는다.
     r = closesocket(sock);
     if (r == SOCKET_ERROR) {
-        std::cerr << "closesocket failed with error " << WSAGetLastError() << std::endl;
+        cerr << "closesocket failed with error " << WSAGetLastError() << endl;
         return 1;
     }
 
