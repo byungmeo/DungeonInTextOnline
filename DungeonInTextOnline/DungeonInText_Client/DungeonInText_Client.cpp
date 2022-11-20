@@ -2,7 +2,9 @@
 #include <hiredis/hiredis.h>
 #include <iostream>
 #include "rapidjson/document.h"
+#include <mutex>
 #include <string>
+#include <queue>
 #include <thread>
 
 #include <WinSock2.h>
@@ -15,6 +17,47 @@ using namespace rapidjson;
 using namespace std;
 
 static unsigned short SERVER_PORT = 27015;
+
+class Message {
+public:
+    string contents;
+    Message(const char* buf) {
+        this->contents = buf;
+    }
+};
+
+queue<shared_ptr<Message> > msgQueue;
+mutex msgQueueMutex;
+condition_variable msgQueueFilledCv;
+
+void messageThreadProc() {
+    cout << "Message thread is starting." << endl;
+    while (true) {
+        // lock_guard 혹은 unique_lock 의 경우 scope 단위로 lock 범위가 지정되므로,
+        // 아래처럼 새로 scope 을 열고 lock 을 잡는 것이 좋다.
+        shared_ptr<Message> msg;
+        {
+            unique_lock<mutex> ul(msgQueueMutex);
+
+            // job queue 에 이벤트가 발생할 때까지 condition variable 을 잡을 것이다.
+            while (msgQueue.empty()) {
+                msgQueueFilledCv.wait(ul);
+            }
+
+            // while loop 을 나왔다는 것은 job queue 에 작업이 있다는 것이다.
+            // queue 의 front 를 기억하고 front 를 pop 해서 큐에서 뺀다.
+            msg = msgQueue.front();
+            msgQueue.pop();
+
+        }
+
+        cout << "msgThread : " << msg.get()->contents << endl;
+
+        // TODO: JSON으로 된 메시지를 뜯어서 출력
+    }
+
+    cout << "Message thread is quitting." << endl;
+}
 
 string moveToJson(int x, int y) {
     char jsonData[UCHAR_MAX];
@@ -110,6 +153,9 @@ int main() {
         return 1;
     }
 
+    // 서버로부터 받은 메시지를 처리하는 Thread
+    thread msgThreaed(messageThreadProc);
+
     // TODO: ID 입력 및 전송 구현
     /*
     */
@@ -156,8 +202,27 @@ int main() {
 
         char buf[1000];
         r = recv(sock, buf, dataLen, 0);
-        std::cout << "데이터 되돌려받음 : " << buf << std::endl;
+        shared_ptr<Message> msg(new Message(buf));
+        {
+            lock_guard<mutex> lg(msgQueueMutex);
+
+            bool wasEmpty = msgQueue.empty();
+            msgQueue.push(msg);
+
+            // 그리고 worker thread 를 깨워준다.
+            // 무조건 condition variable 을 notify 해도 되는데,
+            // 해당 condition variable 은 queue 에 뭔가가 들어가서 더 이상 빈 큐가 아닐 때 쓰이므로
+            // 여기서는 무의미하게 CV 를 notify하지 않도록 큐의 길이가 0에서 1이 되는 순간 notify 를 하도록 하자.
+            if (wasEmpty) {
+                msgQueueFilledCv.notify_one();
+            }
+
+            // lock_guard 는 scope 이 벗어날 때 풀릴 것이다.
+        }
     }
+
+    // join
+    msgThreaed.join();
 
     // Socket 을 닫는다.
     r = closesocket(sock);
