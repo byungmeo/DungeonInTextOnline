@@ -1,6 +1,7 @@
 ﻿#include <chrono>
 #include <hiredis/hiredis.h>
 #include <iostream>
+#include <random>
 #include "rapidjson/document.h"
 #include <mutex>
 #include <string>
@@ -35,6 +36,13 @@ condition_variable msgQueueFilledCv;
 queue<shared_ptr<Message> > commandQueue;
 mutex commandQueueMutex;
 condition_variable commandQueueFilledCv;
+
+// 시드값을 얻기 위한 random_device 생성.
+std::random_device rd;
+// random_device 를 통해 난수 생성 엔진을 초기화 한다.
+std::mt19937 gen(rd());
+// 0 부터 99 까지 균등하게 나타나는 난수열을 생성하기 위해 균등 분포 정의.
+std::uniform_int_distribution<int> dis(0, 99);
 
 void messageThreadProc() {
     cout << "Message thread is starting." << endl;
@@ -248,9 +256,11 @@ string inputCommandJson() {
             getline(cin, msg);
             jsonData = chatToJson(dest, msg.c_str() + 1);
             break;
-        } else if (input.compare("attack") == 0 || input.compare("bot") == 0 || input.compare("monsters") == 0 || input.compare("users") == 0) {
+        } else if (input.compare("attack") == 0 || input.compare("monsters") == 0 || input.compare("users") == 0) {
             jsonData = otherToJson(input);
             break;
+        } else if (input.compare("bot") == 0) {
+            return "bot";
         } else if (input.compare("exit") == 0) {
             return "exit";
         } else {
@@ -258,6 +268,44 @@ string inputCommandJson() {
             cin.ignore(UCHAR_MAX, '\n'); //버퍼를 비운다
             continue;
         }
+    }
+
+    return jsonData;
+}
+
+void pushCommandToQueue(string command) {
+    shared_ptr<Message> msg(new Message(command.c_str()));
+    {
+        lock_guard<mutex> lg(commandQueueMutex);
+
+        bool wasEmpty = commandQueue.empty();
+        commandQueue.push(msg);
+
+        // 그리고 worker thread 를 깨워준다.
+        // 무조건 condition variable 을 notify 해도 되는데,
+        // 해당 condition variable 은 queue 에 뭔가가 들어가서 더 이상 빈 큐가 아닐 때 쓰이므로
+        // 여기서는 무의미하게 CV 를 notify하지 않도록 큐의 길이가 0에서 1이 되는 순간 notify 를 하도록 하자.
+        if (wasEmpty) {
+            commandQueueFilledCv.notify_one();
+        }
+
+        // lock_guard 는 scope 이 벗어날 때 풀릴 것이다.
+    }
+
+    return;
+}
+
+string randomCommandJson() {
+    string jsonData;
+    int random = dis(gen) % 2;
+
+    // attack, move만 우선  수행
+    if (random == 0) {
+        jsonData = otherToJson("attack");
+    } else {
+        int x = dis(gen) % 7 - 3; // -3 ~ 3
+        int y = dis(gen) % 7 - 3;
+        jsonData = moveToJson(x, y);
     }
 
     return jsonData;
@@ -309,24 +357,14 @@ int main() {
         if (command.compare("exit") == 0) {
             cout << "Client를 종료 합니다." << endl;
             break;
-        } else {
-            shared_ptr<Message> msg(new Message(command.c_str()));
-            {
-                lock_guard<mutex> lg(commandQueueMutex);
-
-                bool wasEmpty = commandQueue.empty();
-                commandQueue.push(msg);
-
-                // 그리고 worker thread 를 깨워준다.
-                // 무조건 condition variable 을 notify 해도 되는데,
-                // 해당 condition variable 은 queue 에 뭔가가 들어가서 더 이상 빈 큐가 아닐 때 쓰이므로
-                // 여기서는 무의미하게 CV 를 notify하지 않도록 큐의 길이가 0에서 1이 되는 순간 notify 를 하도록 하자.
-                if (wasEmpty) {
-                    commandQueueFilledCv.notify_one();
-                }
-
-                // lock_guard 는 scope 이 벗어날 때 풀릴 것이다.
+        } else if (command.compare("bot") == 0) {
+            while (true) {
+                command = randomCommandJson();
+                pushCommandToQueue(command);
+                std::this_thread::sleep_for(std::chrono::seconds(1));
             }
+        } else {
+            pushCommandToQueue(command);
         }
     }
 
