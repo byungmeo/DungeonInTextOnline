@@ -25,6 +25,7 @@ static const int NUM_WORKER_THREADS = 10;
 class Client {
 public:
     SOCKET sock;  // 이 클라이언트의 active socket
+    mutex socketMutex;
 
     // TODO: doingRecv -> doingJob
     atomic<bool> doingRecv;
@@ -99,13 +100,17 @@ SOCKET createPassiveSocket() {
 
 bool recvLength(shared_ptr<Client> client) {
     SOCKET activeSock = client->sock;
+    int r;
 
     // 이전에 어디까지 작업했는지에 따라 다르게 처리한다.
     // 이전에 packetLen 을 완성하지 못했다. 그걸 완성하게 한다.
     if (client->lenCompleted == false) {
         // 길이 정보를 받기 위해서 4바이트를 읽는다.
         // network byte order 로 전성되기 때문에 ntohl() 을 호출한다.
-        int r = recv(activeSock, (char*)&(client->packetLen) + client->offset, 4 - client->offset, 0);
+        {
+            unique_lock<mutex> ul(client->socketMutex);
+            r = recv(activeSock, (char*)&(client->packetLen) + client->offset, 4 - client->offset, 0);
+        }
         if (r == SOCKET_ERROR) {
             std::cerr << "recv failed with error " << WSAGetLastError() << std::endl;
             return false;
@@ -144,6 +149,7 @@ bool recvLength(shared_ptr<Client> client) {
 
 bool recvPacket(shared_ptr<Client> client) {
     SOCKET activeSock = client->sock;
+    int r;
 
     // 여기까지 도달했다는 것은 packetLen 을 완성한 경우다. (== lenCompleted 가 true)
     // packetLen 만큼 데이터를 읽으면서 완성한다.
@@ -151,7 +157,10 @@ bool recvPacket(shared_ptr<Client> client) {
         return true;
     }
 
-    int r = recv(activeSock, client->packet + client->offset, client->packetLen - client->offset, 0);
+    {
+        unique_lock<mutex> ul(client->socketMutex);
+        r = recv(activeSock, client->packet + client->offset, client->packetLen - client->offset, 0);
+    }
     if (r == SOCKET_ERROR) {
         std::cerr << "recv failed with error " << WSAGetLastError() << std::endl;
         return false;
@@ -175,7 +184,49 @@ bool recvPacket(shared_ptr<Client> client) {
     }
 }
 
+bool sendMessage(shared_ptr<Client> client, string message) {
+    SOCKET activeSock = client->sock;
+    int r;
+
+    // 우선 명령어를 그대로 되돌려 준다
+    // r = send(activeSock, client->packet, r, 0);
+    string data = message;
+    int dataLen = data.length() + 1; // 문자열의 끝을 의미하는 NULL 문자 포함
+
+    // 길이를 먼저 보낸다.
+    // binary 로 4bytes 를 길이로 encoding 한다.
+    // 이 때 network byte order 로 변환하기 위해서 htonl 을 호출해야된다.
+    int dataLenNetByteOrder = htonl(dataLen);
+    int offset = 0;
+    while (offset < 4) {
+        {
+            unique_lock<mutex> ul(client->socketMutex);
+            r = send(activeSock, ((char*)&dataLenNetByteOrder) + offset, 4 - offset, 0);
+        }
+        if (r == SOCKET_ERROR) {
+            std::cerr << "failed to send length: " << WSAGetLastError() << std::endl;
+            return false;
+        }
+        offset += r;
     }
+    std::cout << "Sent length info: " << dataLen << std::endl;
+
+    // send 로 명령어를 보낸다.
+    offset = 0;
+    while (offset < dataLen) {
+        {
+            unique_lock<mutex> ul(client->socketMutex);
+            r = send(activeSock, data.c_str() + offset, dataLen - offset, 0);
+        }
+        if (r == SOCKET_ERROR) {
+            std::cerr << "send failed with error " << WSAGetLastError() << std::endl;
+            return false;
+        }
+        std::cout << "Sent " << r << " bytes" << std::endl;
+        offset += r;
+    }
+
+    return true;
 }
 
 bool processClient(shared_ptr<Client> client) {
@@ -218,42 +269,19 @@ bool processClient(shared_ptr<Client> client) {
         std::cout << "귓속말 상대 : " << dest << std::endl;
         std::cout << "귓속말 내용 : " << msg << std::endl;
     } else if (command.compare("attack") == 0) {
-        // 우선 유저가 공격 했다는 사실을 다른 모든 유저에게 단순 공지
-
+        // 우선 커맨드를 그대로 다른 모든 유저에게 단순 공지
+        {
+            unique_lock<mutex> ul(activeClientsMutex);
+            for (auto& pair : activeClients) {
+                sendMessage(pair.second, client->packet);
+            }
+        }
     } else if (command.compare("monsters") == 0) {
-    } else if (command.compare("users") == 0) cout << "잘못된 명령어" << endl;
-    
-    // 우선 명령어를 그대로 되돌려 준다
-    // r = send(activeSock, client->packet, r, 0);
-    string data = client->packet;
-    int dataLen = data.length() + 1; // 문자열의 끝을 의미하는 NULL 문자 포함
-
-    // 길이를 먼저 보낸다.
-    // binary 로 4bytes 를 길이로 encoding 한다.
-    // 이 때 network byte order 로 변환하기 위해서 htonl 을 호출해야된다.
-    int dataLenNetByteOrder = htonl(dataLen);
-    int offset = 0;
-    while (offset < 4) {
-        r = send(activeSock, ((char*)&dataLenNetByteOrder) + offset, 4 - offset, 0);
-        if (r == SOCKET_ERROR) {
-            std::cerr << "failed to send length: " << WSAGetLastError() << std::endl;
-            return false;
-        }
-        offset += r;
-    }
-    std::cout << "Sent length info: " << dataLen << std::endl;
-
-    // send 로 명령어를 보낸다.
-    offset = 0;
-    while (offset < dataLen) {
-        r = send(activeSock, data.c_str() + offset, dataLen - offset, 0);
-        if (r == SOCKET_ERROR) {
-            std::cerr << "send failed with error " << WSAGetLastError() << std::endl;
-            return false;
-        }
-        std::cout << "Sent " << r << " bytes" << std::endl;
-        offset += r;
-    }
+        // 일단 명령어만 그대로 보낸다
+        sendMessage(client, client->packet);
+    } else if (command.compare("users") == 0) {
+        // 일단 명령어만 그대로 보낸다
+        sendMessage(client, client->packet);
     } else std::cout << "잘못된 명령어" << std::endl;
 
     return true;
