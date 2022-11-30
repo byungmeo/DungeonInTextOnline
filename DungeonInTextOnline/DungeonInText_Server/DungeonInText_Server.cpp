@@ -43,15 +43,6 @@ public:
     }
 };
 
-class Message {
-public:
-    SOCKET sock; // 목적지에 메시지를 보내줄 active socket
-    string msg;
-    int msgLen;
-
-    Message(SOCKET sock, string msg) : sock(sock), msg(msg), msgLen(msg.length() + 1) {}
-};
-
 map<SOCKET, shared_ptr<Client> > activeClients;
 mutex activeClientsMutex;
 
@@ -59,11 +50,6 @@ mutex activeClientsMutex;
 queue<shared_ptr<Client> > jobQueue;
 mutex jobQueueMutex;
 condition_variable jobQueueFilledCv;
-
-// 보내야 할 message 들의 큐
-queue<shared_ptr<Message>> messageQueue;
-mutex msgQueueMutex;
-condition_variable msgQueueFilledCv;
 
 SOCKET createPassiveSocket() {
     // TCP socket 을 만든다.
