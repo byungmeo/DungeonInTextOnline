@@ -83,7 +83,7 @@ SOCKET createPassiveSocket() {
     return passiveSock;
 }
 
-bool processClient(shared_ptr<Client> client) {
+bool recvLength(shared_ptr<Client> client) {
     SOCKET activeSock = client->sock;
 
     // 이전에 어디까지 작업했는지에 따라 다르게 처리한다.
@@ -126,6 +126,10 @@ bool processClient(shared_ptr<Client> client) {
         client->lenCompleted = true;
         client->offset = 0;
     }
+}
+
+bool recvPacket(shared_ptr<Client> client) {
+    SOCKET activeSock = client->sock;
 
     // 여기까지 도달했다는 것은 packetLen 을 완성한 경우다. (== lenCompleted 가 true)
     // packetLen 만큼 데이터를 읽으면서 완성한다.
@@ -154,6 +158,21 @@ bool processClient(shared_ptr<Client> client) {
         client->packetLen = 0;
     } else {
         cout << "[" << activeSock << "] Partial recv " << r << "bytes. " << client->offset << "/" << client->packetLen << endl;
+    }
+}
+
+bool processClient(shared_ptr<Client> client) {
+    SOCKET activeSock = client->sock;
+    int r;
+
+    // packet을 받기 전 length를 먼저 받는다.
+    if (recvLength(client) == false) {
+        return false;
+    }
+
+    // packet을 받는다.
+    if (recvPacket(client) == false) {
+        return false;
     }
 
     // TODO: JSON 파싱 후 처리
