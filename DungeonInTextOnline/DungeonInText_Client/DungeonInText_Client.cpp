@@ -21,7 +21,7 @@ static unsigned short SERVER_PORT = 27015;
 
 SOCKET sock;
 
-string nickname;
+string userName;
 
 queue<string> msgQueue;
 mutex msgQueueMutex;
@@ -212,27 +212,27 @@ void socketThreadProc() {
     std::cout << "Socket thread is quitting." << std::endl;
 }
 
-string loginToJson(string nickname) {
+string loginToJson() {
     char jsonData[UCHAR_MAX];
-    sprintf_s(jsonData, sizeof(jsonData), "{\"command\": \"login\", \"userName\": \"%s\"}", nickname.c_str());
+    sprintf_s(jsonData, sizeof(jsonData), "{\"command\": \"login\", \"userName\": \"%s\"}", userName.c_str());
     return jsonData;
 }
 
 string moveToJson(int x, int y) {
     char jsonData[UCHAR_MAX];
-    sprintf_s(jsonData, sizeof(jsonData), "{\"command\": \"move\", \"userName\": \"%s\", \"x\": %d, \"y\": %d}", nickname.c_str(), x, y);
+    sprintf_s(jsonData, sizeof(jsonData), "{\"command\": \"move\", \"userName\": \"%s\", \"x\": %d, \"y\": %d}", userName.c_str(), x, y);
     return jsonData;
 }
 
 string chatToJson(string dest, string msg) {
     char jsonData[UCHAR_MAX];
-    sprintf_s(jsonData, sizeof(jsonData), "{\"command\": \"chat\", \"userName\": \"%s\", \"dest\": \"%s\", \"msg\": \"%s\"}", nickname.c_str(), dest.c_str(), msg.c_str());
+    sprintf_s(jsonData, sizeof(jsonData), "{\"command\": \"chat\", \"userName\": \"%s\", \"dest\": \"%s\", \"msg\": \"%s\"}", userName.c_str(), dest.c_str(), msg.c_str());
     return jsonData;
 }
 
 string otherToJson(string command) {
     char jsonData[UCHAR_MAX];
-    sprintf_s(jsonData, sizeof(jsonData), "{\"command\": \"%s\", \"userName\": \"%s\"}", command.c_str(), nickname.c_str());
+    sprintf_s(jsonData, sizeof(jsonData), "{\"command\": \"%s\", \"userName\": \"%s\"}", command.c_str(), userName.c_str());
     return jsonData;
 }
 
@@ -322,7 +322,7 @@ int main() {
     std::cout << "Client" << std::endl;
 
     std::cout << "닉네임 : ";
-    std::cin >> nickname;
+    std::cin >> userName;
 
     int r = 0;
 
@@ -358,7 +358,7 @@ int main() {
     thread msgThreaed(messageThreadProc); // 서버로부터 받은 메시지를 처리하는 Thread
 
     // 닉네임을 서버에 전송
-    pushCommandToQueue(loginToJson(nickname));
+    pushCommandToQueue(loginToJson());
 
     while (true) {
         string command;
