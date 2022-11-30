@@ -21,6 +21,8 @@ static unsigned short SERVER_PORT = 27015;
 
 SOCKET sock;
 
+string nickname;
+
 queue<string> msgQueue;
 mutex msgQueueMutex;
 condition_variable msgQueueFilledCv;
@@ -210,21 +212,27 @@ void socketThreadProc() {
     std::cout << "Socket thread is quitting." << std::endl;
 }
 
+string loginToJson(string nickname) {
+    char jsonData[UCHAR_MAX];
+    sprintf_s(jsonData, sizeof(jsonData), "{\"command\": \"login\", \"userName\": \"%s\"}", nickname.c_str());
+    return jsonData;
+}
+
 string moveToJson(int x, int y) {
     char jsonData[UCHAR_MAX];
-    sprintf_s(jsonData, sizeof(jsonData), "{\"command\": \"move\", \"userName\": \"unknown\", \"x\": %d, \"y\": %d}", x, y);
+    sprintf_s(jsonData, sizeof(jsonData), "{\"command\": \"move\", \"userName\": \"%s\", \"x\": %d, \"y\": %d}", nickname.c_str(), x, y);
     return jsonData;
 }
 
 string chatToJson(string dest, string msg) {
     char jsonData[UCHAR_MAX];
-    sprintf_s(jsonData, sizeof(jsonData), "{\"command\": \"chat\", \"userName\": \"unknown\", \"dest\": \"%s\", \"msg\": \"%s\"}", dest.c_str(), msg.c_str());
+    sprintf_s(jsonData, sizeof(jsonData), "{\"command\": \"chat\", \"userName\": \"%s\", \"dest\": \"%s\", \"msg\": \"%s\"}", nickname.c_str(), dest.c_str(), msg.c_str());
     return jsonData;
 }
 
 string otherToJson(string command) {
     char jsonData[UCHAR_MAX];
-    sprintf_s(jsonData, sizeof(jsonData), "{\"command\": \"%s\", \"userName\": \"unknown\"}", command.c_str());
+    sprintf_s(jsonData, sizeof(jsonData), "{\"command\": \"%s\", \"userName\": \"%s\"}", command.c_str(), nickname.c_str());
     return jsonData;
 }
 
@@ -313,6 +321,9 @@ string randomCommandJson() {
 int main() {
     std::cout << "Client" << std::endl;
 
+    std::cout << "닉네임 : ";
+    std::cin >> nickname;
+
     int r = 0;
 
     // Winsock 을 초기화한다.
@@ -346,9 +357,8 @@ int main() {
     thread socketThread(socketThreadProc); // 소켓 작업을 처리하는 Thread
     thread msgThreaed(messageThreadProc); // 서버로부터 받은 메시지를 처리하는 Thread
 
-    // TODO: ID 입력 및 전송 구현
-    /*
-    */
+    // 닉네임을 서버에 전송
+    pushCommandToQueue(loginToJson(nickname));
 
     while (true) {
         string command;
