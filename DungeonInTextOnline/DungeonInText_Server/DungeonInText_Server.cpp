@@ -42,6 +42,15 @@ public:
     }
 };
 
+class Message {
+public:
+    SOCKET sock; // 목적지에 메시지를 보내줄 active socket
+    string msg;
+    int msgLen;
+
+    Message(SOCKET sock, string msg) : sock(sock), msg(msg), msgLen(msg.length() + 1) {}
+};
+
 map<SOCKET, shared_ptr<Client> > activeClients;
 mutex activeClientsMutex;
 
@@ -49,6 +58,11 @@ mutex activeClientsMutex;
 queue<shared_ptr<Client> > jobQueue;
 mutex jobQueueMutex;
 condition_variable jobQueueFilledCv;
+
+// 보내야 할 message 들의 큐
+queue<shared_ptr<Message>> messageQueue;
+mutex msgQueueMutex;
+condition_variable msgQueueFilledCv;
 
 SOCKET createPassiveSocket() {
     // TCP socket 을 만든다.
@@ -202,6 +216,7 @@ bool processClient(shared_ptr<Client> client) {
         cout << "귓속막 내용 : " << msg << endl;
     } else if (command.compare("attack") == 0) {
         // 우선 유저가 공격 했다는 사실을 다른 모든 유저에게 단순 공지
+
     } else if (command.compare("monsters") == 0) {
     } else if (command.compare("users") == 0) cout << "잘못된 명령어" << endl;
     
