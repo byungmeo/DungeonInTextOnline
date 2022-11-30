@@ -26,6 +26,7 @@ class Client {
 public:
     SOCKET sock;  // 이 클라이언트의 active socket
 
+    // TODO: doingRecv -> doingJob
     atomic<bool> doingRecv;
 
     bool lenCompleted;
@@ -155,11 +156,38 @@ bool processClient(shared_ptr<Client> client) {
         cout << "[" << activeSock << "] Partial recv " << r << "bytes. " << client->offset << "/" << client->packetLen << endl;
     }
 
-    cout << "받은 데이터 : " << client->packet << endl;
-
     // TODO: JSON 파싱 후 처리
-    //우선 명령어를 그대로 되돌려 준다
-    //r = send(activeSock, client->packet, r, 0);
+    cout << "받은 원본 데이터 : " << client->packet << endl;
+    Document d;
+    d.Parse(client->packet);
+    Value& s = d["command"];
+    string command = s.GetString();
+    s = d["userName"];
+    string userName = s.GetString();
+    cout << "명령어 : " << command << endl;
+    cout << "유저명 : " << userName << endl;
+    if (command.compare("move") == 0) {
+        int x, y;
+        s = d["x"];
+        x = s.GetInt();
+        s = d["y"];
+        y = s.GetInt();
+        cout << "좌표 : (" << x << ", " << y << ")" << endl;
+    } else if (command.compare("chat") == 0) {
+        string dest, msg;
+        s = d["dest"];
+        dest = s.GetString();
+        s = d["msg"];
+        msg = s.GetString();
+        cout << "귓속말 상대 : " << dest << endl;
+        cout << "귓속막 내용 : " << msg << endl;
+    } else if (command.compare("attack") == 0) {
+        // 우선 유저가 공격 했다는 사실을 다른 모든 유저에게 단순 공지
+    } else if (command.compare("monsters") == 0) {
+    } else if (command.compare("users") == 0) cout << "잘못된 명령어" << endl;
+    
+    // 우선 명령어를 그대로 되돌려 준다
+    // r = send(activeSock, client->packet, r, 0);
     string data = client->packet;
     int dataLen = data.length() + 1; // 문자열의 끝을 의미하는 NULL 문자 포함
 
