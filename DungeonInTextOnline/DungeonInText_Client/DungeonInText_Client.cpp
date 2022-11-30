@@ -19,21 +19,13 @@ using namespace std;
 
 static unsigned short SERVER_PORT = 27015;
 
-class Message {
-public:
-    string contents;
-    Message(const char* buf) {
-        this->contents = buf;
-    }
-};
-
 SOCKET sock;
 
-queue<shared_ptr<Message> > msgQueue;
+queue<string> msgQueue;
 mutex msgQueueMutex;
 condition_variable msgQueueFilledCv;
 
-queue<shared_ptr<Message> > commandQueue;
+queue<string> commandQueue;
 mutex commandQueueMutex;
 condition_variable commandQueueFilledCv;
 
@@ -44,12 +36,45 @@ std::mt19937 gen(rd());
 // 0 부터 99 까지 균등하게 나타나는 난수열을 생성하기 위해 균등 분포 정의.
 std::uniform_int_distribution<int> dis(0, 99);
 
+bool sendMessage(string message) {
+    int r;
+    string data = message;
+    int dataLen = data.length() + 1; // 문자열의 끝을 의미하는 NULL 문자 포함
+
+    // 길이를 먼저 보낸다.
+    // binary 로 4bytes 를 길이로 encoding 한다.
+    // 이 때 network byte order 로 변환하기 위해서 htonl 을 호출해야된다.
+    int dataLenNetByteOrder = htonl(dataLen);
+    int offset = 0;
+    while (offset < 4) {
+        r = send(sock, ((char*)&dataLenNetByteOrder) + offset, 4 - offset, 0);
+        if (r == SOCKET_ERROR) {
+            std::cerr << "failed to send length: " << WSAGetLastError() << std::endl;
+            return false;
+        }
+        offset += r;
+    }
+    std::cout << "Sent length info: " << dataLen << std::endl;
+
+    // send 로 명령어를 보낸다.
+    offset = 0;
+    while (offset < dataLen) {
+        r = send(sock, data.c_str() + offset, dataLen - offset, 0);
+        if (r == SOCKET_ERROR) {
+            std::cerr << "send failed with error " << WSAGetLastError() << std::endl;
+            return false;
+        }
+        std::cout << "Sent " << r << " bytes" << std::endl;
+        offset += r;
+    }
+}
+
 void messageThreadProc() {
     std::cout << "Message thread is starting." << std::endl;
     while (true) {
         // lock_guard 혹은 unique_lock 의 경우 scope 단위로 lock 범위가 지정되므로,
         // 아래처럼 새로 scope 을 열고 lock 을 잡는 것이 좋다.
-        shared_ptr<Message> msg;
+        string msg;
         {
             unique_lock<mutex> ul(msgQueueMutex);
 
@@ -65,7 +90,7 @@ void messageThreadProc() {
 
         }
 
-        std::cout << "msgThread : " << msg.get()->contents << std::endl;
+        std::cout << "msgThread : " << msg << std::endl;
 
         // TODO: JSON으로 된 메시지를 뜯어서 출력
     }
@@ -80,7 +105,7 @@ void socketThreadProc() {
 
     while (true) {
         // JSON으로 변환된 명령어를 입력받음
-        shared_ptr<Message> command;
+        string command;
         bool hasCommand = false;
         {
             unique_lock<mutex> ul(commandQueueMutex);
@@ -94,35 +119,10 @@ void socketThreadProc() {
             }
         }
 
+        // 입력이 있으면 서버에 전송한다.
         if (hasCommand) {
-            string data = command.get()->contents;
-            int dataLen = data.length() + 1; // 문자열의 끝을 의미하는 NULL 문자 포함
-
-            // 길이를 먼저 보낸다.
-            // binary 로 4bytes 를 길이로 encoding 한다.
-            // 이 때 network byte order 로 변환하기 위해서 htonl 을 호출해야된다.
-            int dataLenNetByteOrder = htonl(dataLen);
-            int offset = 0;
-            while (offset < 4) {
-                r = send(sock, ((char*)&dataLenNetByteOrder) + offset, 4 - offset, 0);
-                if (r == SOCKET_ERROR) {
-                    std::cerr << "failed to send length: " << WSAGetLastError() << std::endl;
-                    return;
-                }
-                offset += r;
-            }
-            std::cout << "Sent length info: " << dataLen << std::endl;
-
-            // send 로 명령어를 보낸다.
-            offset = 0;
-            while (offset < dataLen) {
-                r = send(sock, data.c_str() + offset, dataLen - offset, 0);
-                if (r == SOCKET_ERROR) {
-                    std::cerr << "send failed with error " << WSAGetLastError() << std::endl;
-                    return;
-                }
-                std::cout << "Sent " << r << " bytes" << std::endl;
-                offset += r;
+            if (sendMessage(command) == false) {
+                return;
             }
         }
 
@@ -187,7 +187,7 @@ void socketThreadProc() {
             }
 
             r = recv(sock, buf, packetLen, 0);
-            shared_ptr<Message> msg(new Message(buf));
+            string msg = buf;
             {
                 lock_guard<mutex> lg(msgQueueMutex);
 
@@ -274,12 +274,11 @@ string inputCommandJson() {
 }
 
 void pushCommandToQueue(string command) {
-    shared_ptr<Message> msg(new Message(command.c_str()));
     {
         lock_guard<mutex> lg(commandQueueMutex);
 
         bool wasEmpty = commandQueue.empty();
-        commandQueue.push(msg);
+        commandQueue.push(command);
 
         // 그리고 worker thread 를 깨워준다.
         // 무조건 condition variable 을 notify 해도 되는데,
