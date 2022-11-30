@@ -215,6 +215,12 @@ bool sendMessage(shared_ptr<Client> client, string message) {
     return true;
 }
 
+string noticeToJson(string msg) {
+    char jsonData[UCHAR_MAX];
+    sprintf_s(jsonData, sizeof(jsonData), "{\"command\": \"notice\", \"msg\": \"%s 님이 게임에 접속하였습니다.\"}", msg.c_str());
+    return jsonData;
+}
+
 bool processClient(shared_ptr<Client> client) {
     SOCKET activeSock = client->sock;
     int r;
@@ -260,6 +266,14 @@ bool processClient(shared_ptr<Client> client) {
             unique_lock<mutex> ul(activeClientsMutex);
             for (auto& pair : activeClients) {
                 sendMessage(pair.second, client->packet);
+            }
+        }
+    } else if (command.compare("login") == 0) {
+        // 유저가 로그인 하였다고 모든 유저에게 공지
+        {
+            unique_lock<mutex> ul(activeClientsMutex);
+            for (auto& pair : activeClients) {
+                sendMessage(pair.second, noticeToJson(userName));
             }
         }
     } else if (command.compare("monsters") == 0) {
