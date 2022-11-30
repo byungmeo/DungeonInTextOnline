@@ -45,7 +45,7 @@ std::mt19937 gen(rd());
 std::uniform_int_distribution<int> dis(0, 99);
 
 void messageThreadProc() {
-    cout << "Message thread is starting." << endl;
+    std::cout << "Message thread is starting." << std::endl;
     while (true) {
         // lock_guard 혹은 unique_lock 의 경우 scope 단위로 lock 범위가 지정되므로,
         // 아래처럼 새로 scope 을 열고 lock 을 잡는 것이 좋다.
@@ -65,16 +65,16 @@ void messageThreadProc() {
 
         }
 
-        cout << "msgThread : " << msg.get()->contents << endl;
+        std::cout << "msgThread : " << msg.get()->contents << std::endl;
 
         // TODO: JSON으로 된 메시지를 뜯어서 출력
     }
 
-   cout << "Message thread is quitting." << endl;
+   std::cout << "Message thread is quitting." << std::endl;
 }
 
 void socketThreadProc() {
-    cout << "Socket thread is starting." << endl;
+    std::cout << "Socket thread is starting." << std::endl;
 
     int r;
 
@@ -106,22 +106,22 @@ void socketThreadProc() {
             while (offset < 4) {
                 r = send(sock, ((char*)&dataLenNetByteOrder) + offset, 4 - offset, 0);
                 if (r == SOCKET_ERROR) {
-                    cerr << "failed to send length: " << WSAGetLastError() << endl;
+                    std::cerr << "failed to send length: " << WSAGetLastError() << std::endl;
                     return;
                 }
                 offset += r;
             }
-            cout << "Sent length info: " << dataLen << endl;
+            std::cout << "Sent length info: " << dataLen << std::endl;
 
             // send 로 명령어를 보낸다.
             offset = 0;
             while (offset < dataLen) {
                 r = send(sock, data.c_str() + offset, dataLen - offset, 0);
                 if (r == SOCKET_ERROR) {
-                    cerr << "send failed with error " << WSAGetLastError() << endl;
+                    std::cerr << "send failed with error " << WSAGetLastError() << std::endl;
                     return;
                 }
-                cout << "Sent " << r << " bytes" << endl;
+                std::cout << "Sent " << r << " bytes" << std::endl;
                 offset += r;
             }
         }
@@ -138,7 +138,7 @@ void socketThreadProc() {
         r = select(maxSock + 1, &readSet, NULL, NULL, &timeout);
 
         if (r == SOCKET_ERROR) {
-            cerr << "select failed: " << WSAGetLastError() << endl;
+            std::cerr << "select failed: " << WSAGetLastError() << std::endl;
             break;
         } else if (r == 0) continue;
 
@@ -152,12 +152,12 @@ void socketThreadProc() {
                 // network byte order 로 전성되기 때문에 ntohl() 을 호출한다.
                 r = recv(sock, (char*)&(packetLen)+offset, 4 - offset, 0);
                 if (r == SOCKET_ERROR) {
-                    cerr << "recv failed with error " << WSAGetLastError() << endl;
+                    std::cerr << "recv failed with error " << WSAGetLastError() << std::endl;
                     return;
                 } else if (r == 0) {
                     // 메뉴얼을 보면 recv() 는 소켓이 닫힌 경우 0 을 반환함을 알 수 있다.
                     // 따라서 r == 0 인 경우도 loop 을 탈출하게 해야된다.
-                    cerr << "Socket closed: " << sock << endl;
+                    std::cerr << "Socket closed: " << sock << std::endl;
                     return;
                 }
                 offset += r;
@@ -170,14 +170,14 @@ void socketThreadProc() {
                 // network byte order 로 전송했었다.
                 // 따라서 이를 host byte order 로 변경한다.
                 int dataLen = ntohl(packetLen);
-                cout << "Received length info: " << dataLen << endl;
+                std::cout << "Received length info: " << dataLen << std::endl;
                 packetLen = dataLen;
 
                 // 우리는 Client class 안에 packet 길이를 최대 64KB 로 제한하고 있다.
                 // 혹시 우리가 받을 데이터가 이것보다 큰지 확인한다.
                 // 만일 크다면 처리 불가능이므로 오류로 처리한다.
                 if (packetLen > sizeof(buf)) {
-                    cerr << "Too big data: " << packetLen << endl;
+                    std::cerr << "Too big data: " << packetLen << std::endl;
                     return;
                 }
 
@@ -207,7 +207,7 @@ void socketThreadProc() {
 
         }
     }
-    cout << "Socket thread is quitting." << endl;
+    std::cout << "Socket thread is quitting." << std::endl;
 }
 
 string moveToJson(int x, int y) {
@@ -236,14 +236,14 @@ string inputCommandJson() {
             int x, y;
             cin >> x;
             if (cin.fail() || abs(x) > 3) {
-                cerr << "잘못된 좌표 입력" << endl;
+                std::cerr << "잘못된 좌표 입력" << std::endl;
                 cin.clear(); // 에러 비트 초기화
                 cin.ignore(UCHAR_MAX, '\n'); // 버퍼를 비운다
                 continue; // 처음부터 다시 입력
             }
             cin >> y;
             if (cin.fail() || abs(y) > 3) {
-                cerr << "잘못된 좌표 입력" << endl;
+                std::cerr << "잘못된 좌표 입력" << std::endl;
                 cin.clear(); //에러 비트 초기화
                 cin.ignore(UCHAR_MAX, '\n'); //버퍼를 비운다
                 continue; // 처음부터 다시 입력
@@ -264,7 +264,7 @@ string inputCommandJson() {
         } else if (input.compare("exit") == 0) {
             return "exit";
         } else {
-            cerr << "잘못된 명령어" << endl;
+            std::cerr << "잘못된 명령어" << std::endl;
             cin.ignore(UCHAR_MAX, '\n'); //버퍼를 비운다
             continue;
         }
@@ -312,7 +312,7 @@ string randomCommandJson() {
 }
 
 int main() {
-    cout << "Client" << endl;
+    std::cout << "Client" << std::endl;
 
     int r = 0;
 
@@ -320,7 +320,7 @@ int main() {
     WSADATA wsaData;
     r = WSAStartup(MAKEWORD(2, 2), &wsaData);
     if (r != NO_ERROR) {
-        cerr << "WSAStartup failed with error " << r << endl;
+        std::cerr << "WSAStartup failed with error " << r << std::endl;
         return 1;
     }
 
@@ -329,7 +329,7 @@ int main() {
     // TCP socket 을 만든다.
     sock = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
     if (sock == INVALID_SOCKET) {
-        cerr << "socket failed with error " << WSAGetLastError() << endl;
+        std::cerr << "socket failed with error " << WSAGetLastError() << std::endl;
         return 1;
     }
 
@@ -340,7 +340,7 @@ int main() {
     inet_pton(AF_INET, "127.0.0.1", &serverAddr.sin_addr);
     r = connect(sock, (sockaddr*)&serverAddr, sizeof(serverAddr));
     if (r == SOCKET_ERROR) {
-        cerr << "connect failed with error " << WSAGetLastError() << endl;
+        std::cerr << "connect failed with error " << WSAGetLastError() << std::endl;
         return 1;
     }
 
@@ -355,7 +355,7 @@ int main() {
         string command;
         command = inputCommandJson();
         if (command.compare("exit") == 0) {
-            cout << "Client를 종료 합니다." << endl;
+            std::cout << "Client를 종료 합니다." << std::endl;
             break;
         } else if (command.compare("bot") == 0) {
             while (true) {
@@ -375,7 +375,7 @@ int main() {
     // Socket 을 닫는다.
     r = closesocket(sock);
     if (r == SOCKET_ERROR) {
-        cerr << "closesocket failed with error " << WSAGetLastError() << endl;
+        std::cerr << "closesocket failed with error " << WSAGetLastError() << std::endl;
         return 1;
     }
 

@@ -38,7 +38,7 @@ public:
     }
 
     ~Client() {
-        cout << "Client destroyed. Socket: " << sock << endl;
+        std::cout << "Client destroyed. Socket: " << sock << std::endl;
     }
 };
 
@@ -68,7 +68,7 @@ SOCKET createPassiveSocket() {
     // TCP socket 을 만든다.
     SOCKET passiveSock = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
     if (passiveSock == INVALID_SOCKET) {
-        cerr << "socket failed with error " << WSAGetLastError() << endl;
+        std::cerr << "socket failed with error " << WSAGetLastError() << std::endl;
         return 1;
     }
 
@@ -81,7 +81,7 @@ SOCKET createPassiveSocket() {
 
     int r = bind(passiveSock, (sockaddr*)&serverAddr, sizeof(serverAddr));
     if (r == SOCKET_ERROR) {
-        cerr << "bind failed with error " << WSAGetLastError() << endl;
+        std::cerr << "bind failed with error " << WSAGetLastError() << std::endl;
         return 1;
     }
 
@@ -90,7 +90,7 @@ SOCKET createPassiveSocket() {
     // active socket 은 passive socket 을 이용해 accept() 를 호출함으로써 만들어진다.
     r = listen(passiveSock, 10);
     if (r == SOCKET_ERROR) {
-        cerr << "listen faijled with error " << WSAGetLastError() << endl;
+        std::cerr << "listen faijled with error " << WSAGetLastError() << std::endl;
         return 1;
     }
 
@@ -107,12 +107,12 @@ bool recvLength(shared_ptr<Client> client) {
         // network byte order 로 전성되기 때문에 ntohl() 을 호출한다.
         int r = recv(activeSock, (char*)&(client->packetLen) + client->offset, 4 - client->offset, 0);
         if (r == SOCKET_ERROR) {
-            cerr << "recv failed with error " << WSAGetLastError() << endl;
+            std::cerr << "recv failed with error " << WSAGetLastError() << std::endl;
             return false;
         } else if (r == 0) {
             // 메뉴얼을 보면 recv() 는 소켓이 닫힌 경우 0 을 반환함을 알 수 있다.
             // 따라서 r == 0 인 경우도 loop 을 탈출하게 해야된다.
-            cerr << "Socket closed: " << activeSock << endl;
+            std::cerr << "Socket closed: " << activeSock << std::endl;
             return false;
         }
         client->offset += r;
@@ -125,14 +125,14 @@ bool recvLength(shared_ptr<Client> client) {
         // network byte order 로 전송했었다.
         // 따라서 이를 host byte order 로 변경한다.
         int dataLen = ntohl(client->packetLen);
-        cout << "[" << activeSock << "] Received length info: " << dataLen << endl;
+        std::cout << "[" << activeSock << "] Received length info: " << dataLen << std::endl;
         client->packetLen = dataLen;
 
         // 우리는 Client class 안에 packet 길이를 최대 64KB 로 제한하고 있다.
         // 혹시 우리가 받을 데이터가 이것보다 큰지 확인한다.
         // 만일 크다면 처리 불가능이므로 오류로 처리한다.
         if (client->packetLen > sizeof(client->packet)) {
-            cerr << "[" << activeSock << "] Too big data: " << client->packetLen << endl;
+            std::cerr << "[" << activeSock << "] Too big data: " << client->packetLen << std::endl;
             return false;
         }
 
@@ -153,7 +153,7 @@ bool recvPacket(shared_ptr<Client> client) {
 
     int r = recv(activeSock, client->packet + client->offset, client->packetLen - client->offset, 0);
     if (r == SOCKET_ERROR) {
-        cerr << "recv failed with error " << WSAGetLastError() << endl;
+        std::cerr << "recv failed with error " << WSAGetLastError() << std::endl;
         return false;
     } else if (r == 0) {
         // 메뉴얼을 보면 recv() 는 소켓이 닫힌 경우 0 을 반환함을 알 수 있다.
@@ -164,14 +164,17 @@ bool recvPacket(shared_ptr<Client> client) {
 
     // 완성한 경우와 partial recv 인 경우를 구분해서 로그를 찍는다.
     if (client->offset == client->packetLen) {
-        cout << "[" << activeSock << "] Received " << client->packetLen << " bytes" << endl;
+        std::cout << "[" << activeSock << "] Received " << client->packetLen << " bytes" << std::endl;
 
         // 다음 패킷을 위해 패킷 관련 정보를 초기화한다.
         client->lenCompleted = false;
         client->offset = 0;
         client->packetLen = 0;
     } else {
-        cout << "[" << activeSock << "] Partial recv " << r << "bytes. " << client->offset << "/" << client->packetLen << endl;
+        std::cout << "[" << activeSock << "] Partial recv " << r << "bytes. " << client->offset << "/" << client->packetLen << std::endl;
+    }
+}
+
     }
 }
 
@@ -190,30 +193,30 @@ bool processClient(shared_ptr<Client> client) {
     }
 
     // TODO: JSON 파싱 후 처리
-    cout << "받은 원본 데이터 : " << client->packet << endl;
+    std::cout << "받은 원본 데이터 : " << client->packet << std::endl;
     Document d;
     d.Parse(client->packet);
     Value& s = d["command"];
     string command = s.GetString();
     s = d["userName"];
     string userName = s.GetString();
-    cout << "명령어 : " << command << endl;
-    cout << "유저명 : " << userName << endl;
+    std::cout << "명령어 : " << command << std::endl;
+    std::cout << "유저명 : " << userName << std::endl;
     if (command.compare("move") == 0) {
         int x, y;
         s = d["x"];
         x = s.GetInt();
         s = d["y"];
         y = s.GetInt();
-        cout << "좌표 : (" << x << ", " << y << ")" << endl;
+        std::cout << "좌표 : (" << x << ", " << y << ")" << std::endl;
     } else if (command.compare("chat") == 0) {
         string dest, msg;
         s = d["dest"];
         dest = s.GetString();
         s = d["msg"];
         msg = s.GetString();
-        cout << "귓속말 상대 : " << dest << endl;
-        cout << "귓속막 내용 : " << msg << endl;
+        std::cout << "귓속말 상대 : " << dest << std::endl;
+        std::cout << "귓속말 내용 : " << msg << std::endl;
     } else if (command.compare("attack") == 0) {
         // 우선 유저가 공격 했다는 사실을 다른 모든 유저에게 단순 공지
 
@@ -251,12 +254,13 @@ bool processClient(shared_ptr<Client> client) {
         std::cout << "Sent " << r << " bytes" << std::endl;
         offset += r;
     }
+    } else std::cout << "잘못된 명령어" << std::endl;
 
     return true;
 }
 
 void workerThreadProc(int workerId) {
-    cout << "Worker thread is starting. WorkerId: " << workerId << endl;
+    std::cout << "Worker thread is starting. WorkerId: " << workerId << std::endl;
 
     while (true) {
         // lock_guard 혹은 unique_lock 의 경우 scope 단위로 lock 범위가 지정되므로,
@@ -304,11 +308,11 @@ void workerThreadProc(int workerId) {
         }
     }
 
-    cout << "Worker thread is quitting. Worker id: " << workerId << endl;
+    std::cout << "Worker thread is quitting. Worker id: " << workerId << std::endl;
 }
 
 int main() {
-    cout << "Server" << endl;
+    std::cout << "Server" << std::endl;
 
     int r = 0;
 
@@ -316,7 +320,7 @@ int main() {
     WSADATA wsaData;
     r = WSAStartup(MAKEWORD(2, 2), &wsaData);
     if (r != NO_ERROR) {
-        cerr << "WSAStartup failed with error " << r << endl;
+        std::cerr << "WSAStartup failed with error " << r << std::endl;
         return 1;
     }
 
@@ -372,7 +376,7 @@ int main() {
         // select 의 반환값이 오류일 때 SOCKET_ERROR, 그 외의 경우 이벤트가 발생한 소켓 갯수이다.
         // 따라서 반환값 r 이 0인 경우는 아래를 스킵하게 한다.
         if (r == SOCKET_ERROR) {
-            cerr << "select failed: " << WSAGetLastError() << endl;
+            std::cerr << "select failed: " << WSAGetLastError() << std::endl;
             break;
         } else if (r == 0)  continue;
 
@@ -382,7 +386,7 @@ int main() {
             // accept() 는 blocking 이지만 이미 select() 를 통해 새 연결이 있음을 알고 accept() 를 호출한다.
             // 따라서 여기서는 blocking 되지 않는다.
             // 연결이 완료되고 만들어지는 소켓은 active socket 이다.
-            cout << "Waiting for a connection" << endl;
+            std::cout << "Waiting for a connection" << std::endl;
             struct sockaddr_in clientAddr;
             int clientAddrSize = sizeof(clientAddr);
             SOCKET activeSock = accept(passiveSock, (sockaddr*)&clientAddr, &clientAddrSize);
@@ -390,7 +394,7 @@ int main() {
             // accpet() 가 실패하면 해당 연결은 이루어지지 않았음을 의미한다.
             // 그 연결이 잘못된다고 하더라도 다른 연결들을 처리해야되므로 에러가 발생했다고 하더라도 계속 진행한다.
             if (activeSock == INVALID_SOCKET) {
-                cerr << "accept failed with error " << WSAGetLastError() << endl;
+                std::cerr << "accept failed with error " << WSAGetLastError() << std::endl;
                 return 1;
             } else {
                 // 새로 client 객체를 만든다.
@@ -402,8 +406,8 @@ int main() {
                 // 로그를 찍는다.
                 char strBuf[1024];
                 inet_ntop(AF_INET, &(clientAddr.sin_addr), strBuf, sizeof(strBuf));
-                cout << "New client from " << strBuf << ":" << ntohs(clientAddr.sin_port) << ". "
-                    << "Socket: " << activeSock << endl;
+                std::cout << "New client from " << strBuf << ":" << ntohs(clientAddr.sin_port) << ". "
+                    << "Socket: " << activeSock << std::endl;
             }
         }
 
@@ -415,7 +419,7 @@ int main() {
             shared_ptr<Client> client = entry.second;
 
             if (FD_ISSET(activeSock, &exceptionSet)) {
-                cerr << "Exception on socket " << activeSock << endl;
+                std::cerr << "Exception on socket " << activeSock << std::endl;
 
                 // 소켓을 닫는다.
                 closesocket(activeSock);
@@ -473,7 +477,7 @@ int main() {
     // 연결을 기다리는 passive socket 을 닫는다.
     r = closesocket(passiveSock);
     if (r == SOCKET_ERROR) {
-        cerr << "closesocket(passive) failed with error " << WSAGetLastError() << endl;
+        std::cerr << "closesocket(passive) failed with error " << WSAGetLastError() << std::endl;
         return 1;
     }
 
