@@ -27,7 +27,6 @@ public:
     SOCKET sock;  // 이 클라이언트의 active socket
     mutex socketMutex;
 
-    // TODO: doingRecv -> doingJob
     atomic<bool> doingRecv;
 
     bool lenCompleted;
@@ -131,6 +130,8 @@ bool recvLength(shared_ptr<Client> client) {
         client->lenCompleted = true;
         client->offset = 0;
     }
+
+    return true;
 }
 
 bool recvPacket(shared_ptr<Client> client) {
@@ -168,6 +169,8 @@ bool recvPacket(shared_ptr<Client> client) {
     } else {
         std::cout << "[" << activeSock << "] Partial recv " << r << "bytes. " << client->offset << "/" << client->packetLen << std::endl;
     }
+
+    return true;
 }
 
 bool sendMessage(shared_ptr<Client> client, string message) {
@@ -223,7 +226,6 @@ string noticeToJson(string msg) {
 
 bool processClient(shared_ptr<Client> client) {
     SOCKET activeSock = client->sock;
-    int r;
 
     // packet을 받기 전 length를 먼저 받는다.
     if (recvLength(client) == false) {
