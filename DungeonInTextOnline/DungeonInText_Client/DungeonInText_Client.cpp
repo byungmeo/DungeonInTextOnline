@@ -69,6 +69,8 @@ bool sendMessage(string message) {
         std::cout << "Sent " << r << " bytes" << std::endl;
         offset += r;
     }
+
+    return true;
 }
 
 void messageThreadProc() {
@@ -95,6 +97,19 @@ void messageThreadProc() {
         std::cout << "msgThread : " << msg << std::endl;
 
         // TODO: JSON으로 된 메시지를 뜯어서 출력
+        Document d;
+        d.Parse(msg.c_str());
+
+        if (d.HasMember("tag") == false) continue;
+        Value& s = d["tag"];
+        string tag = s.GetString();
+        if (tag.compare("notice") == 0) {
+            s = d["msg"];
+            string msg = s.GetString();
+            SetConsoleTextAttribute(GetStdHandle(STD_OUTPUT_HANDLE), 2); // GREEN
+            std::cout << "[서버공지] " << msg << std::endl;
+            SetConsoleTextAttribute(GetStdHandle(STD_OUTPUT_HANDLE), 7); // WHITE (Default)
+        }
     }
 
    std::cout << "Message thread is quitting." << std::endl;

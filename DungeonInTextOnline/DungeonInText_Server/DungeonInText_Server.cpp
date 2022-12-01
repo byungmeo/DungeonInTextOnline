@@ -217,7 +217,7 @@ bool sendMessage(shared_ptr<Client> client, string message) {
 
 string noticeToJson(string msg) {
     char jsonData[UCHAR_MAX];
-    sprintf_s(jsonData, sizeof(jsonData), "{\"command\": \"notice\", \"msg\": \"%s 님이 게임에 접속하였습니다.\"}", msg.c_str());
+    sprintf_s(jsonData, sizeof(jsonData), "{\"tag\": \"notice\", \"msg\": \"%s 님이 게임에 접속하였습니다.\"}", msg.c_str());
     return jsonData;
 }
 
