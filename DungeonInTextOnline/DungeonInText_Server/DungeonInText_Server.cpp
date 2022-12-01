@@ -22,6 +22,8 @@ using namespace std;
 static unsigned short SERVER_PORT = 27015;
 static const int NUM_WORKER_THREADS = 10;
 
+redisContext* c;
+
 class Client {
 public:
     SOCKET sock;  // 이 클라이언트의 active socket
@@ -271,13 +273,33 @@ bool processClient(shared_ptr<Client> client) {
             }
         }
     } else if (command.compare("login") == 0) {
+        // 유저가 로그인하면 소켓 번호를 저장
+        redisReply *reply;
+        printf("SET USER:%s:socket %d\n", userName.c_str(), (int)activeSock);
+        reply = (redisReply *)redisCommand(c, "SET USER:%s:socket %d", userName.c_str(), (int)activeSock);
+        if (reply == NULL) {
+            printf("redisCommand reply is NULL: %s\n", c->errstr);
+            return false;
+        }
+        if (reply->type == REDIS_REPLY_ERROR) {
+            printf("Command Error: %s\n", reply->str);
+            freeReplyObject(reply);
+            return false;
+        }
+        freeReplyObject(reply);
+
+        reply = (redisReply*)redisCommand(c, "GET USER:%s:socket", userName.c_str());
         // 유저가 로그인 하였다고 모든 유저에게 공지
         {
             unique_lock<mutex> ul(activeClientsMutex);
             for (auto& pair : activeClients) {
                 sendMessage(pair.second, noticeToJson(userName));
+
+                // 디버깅을 위해 소켓 번호도 함께 공지
+                sendMessage(pair.second, noticeToJson(reply->str));
             }
         }
+        freeReplyObject(reply);
     } else if (command.compare("monsters") == 0) {
         // 일단 명령어만 그대로 보낸다
         sendMessage(client, client->packet);
@@ -352,6 +374,17 @@ int main() {
     if (r != NO_ERROR) {
         std::cerr << "WSAStartup failed with error " << r << std::endl;
         return 1;
+    }
+
+    // Redis 연결
+    c = redisConnect("127.0.0.1", 6379);
+    if (c == NULL || c->err) {
+        if (c) {
+            std::cout << "Exception on Redis Connect : " << c->errstr << std::endl;
+            return 1;
+        } else {
+            std::cout << "Can't allocate redis context" << std::endl;
+        }
     }
 
     // Create passive socket
@@ -503,6 +536,9 @@ int main() {
     for (shared_ptr<thread>& workerThread : threads) {
         workerThread->join();
     }
+
+    // RedisContext 정리
+    redisFree(c);
 
     // 연결을 기다리는 passive socket 을 닫는다.
     r = closesocket(passiveSock);
