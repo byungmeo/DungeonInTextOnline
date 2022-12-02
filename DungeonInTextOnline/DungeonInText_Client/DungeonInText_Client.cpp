@@ -128,8 +128,7 @@ void messageThreadProc() {
         Value& s = d["tag"];
         string tag = s.GetString();
         if (tag.compare("notice") == 0) {
-            s = d["msg"];
-            string msg = s.GetString();
+            string msg = (s = d["msg"]).GetString();
             SetConsoleTextAttribute(COL, YELLOW);
             std::cout << msg << std::endl;
             SetConsoleTextAttribute(COL, ORIGINAL);
@@ -153,6 +152,17 @@ void messageThreadProc() {
             cout << damage;
             SetConsoleTextAttribute(COL, YELLOW);
             cout << " 데미지를 가했습니다." << endl;
+            SetConsoleTextAttribute(COL, ORIGINAL);
+        } else if (tag.compare("whisper") == 0) {
+            string sender, msg;
+            sender = (s = d["sender"]).GetString();
+            msg = (s = d["msg"]).GetString();
+            SetConsoleTextAttribute(COL, SKY_BLUE);
+            cout << "[ 귓속말 ] ";
+            SetConsoleTextAttribute(COL, WHITE);
+            cout << sender;
+            SetConsoleTextAttribute(COL, SKY_BLUE);
+            cout << " : " << msg << endl;
             SetConsoleTextAttribute(COL, ORIGINAL);
         }
     }

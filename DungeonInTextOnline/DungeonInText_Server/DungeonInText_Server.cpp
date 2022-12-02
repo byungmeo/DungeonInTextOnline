@@ -234,6 +234,14 @@ string attackToJson(string attacker, string target, int damage) {
     return jsonData;
 }
 
+string whisperToJson(string sender, string target, string msg) {
+    char jsonData[UCHAR_MAX];
+    sprintf_s(jsonData, sizeof(jsonData),
+        "{\"tag\": \"whisper\", \"sender\": \"%s\", \"target\": \"%s\", \"msg\": \"%s\"}",
+        sender.c_str(), target.c_str(), msg.c_str());
+    return jsonData;
+}
+
 bool processClient(shared_ptr<Client> client) {
     SOCKET activeSock = client->sock;
 
@@ -265,11 +273,15 @@ bool processClient(shared_ptr<Client> client) {
         // TODO: move
     } else if (command.compare("chat") == 0) {
         string dest, msg;
-        s = d["dest"];
-        dest = s.GetString();
-        s = d["msg"];
-        msg = s.GetString();
+        dest = (s = d["dest"]).GetString();
+        msg = (s = d["msg"]).GetString();
         // TODO: chat
+        redisReply* reply;
+        reply = (redisReply*)redisCommand(c, "GET USER:%s:socket", dest.c_str());
+        {
+            unique_lock<mutex> ul(activeClientsMutex);
+            sendMessage(activeClients[atoi(reply->str)], whisperToJson(userName, dest, msg));
+        }
     } else if (command.compare("attack") == 0) {
         // TODO: attack
         {
