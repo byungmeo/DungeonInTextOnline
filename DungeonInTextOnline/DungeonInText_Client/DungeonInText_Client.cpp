@@ -14,10 +14,31 @@
 // ws2_32.lib 를 링크한다.
 #pragma comment(lib, "Ws2_32.lib")
 
+#define COL GetStdHandle(STD_OUTPUT_HANDLE)  // 콘솔창의 핸들정보 받기
+
 using namespace rapidjson;
 using namespace std;
 
 static unsigned short SERVER_PORT = 27015;
+
+enum ConsoleColor {
+    BLACK = 0x0000,         // 검정
+    DARK_BLUE = 0x0001,     // 남색
+    GREEN = 0x0002,         // 녹색
+    BLUE_GREEN = 0x0003,    // 청록
+    BLOOD = 0x0004,         // 검붉은색
+    PURPLE = 0x0005,        // 보라
+    GOLD = 0x0006,          // 금색
+    ORIGINAL = 0x0007,      // 밝은 회색 (ORIGINAL CONSOLE COLOR)
+    GRAY = 0x0008,          // 회색
+    BLUE = 0x0009,          // 파랑
+    HIGH_GREEN = 0x000a,    // 연두
+    SKY_BLUE = 0x000b,      // 하늘
+    RED = 0x000c,           // 빨강
+    PLUM = 0x000d,          // 자주
+    YELLOW = 0x000e,        // 노랑
+    WHITE = 0x000f          // 흰색
+};
 
 SOCKET sock;
 
@@ -106,9 +127,9 @@ void messageThreadProc() {
         if (tag.compare("notice") == 0) {
             s = d["msg"];
             string msg = s.GetString();
-            SetConsoleTextAttribute(GetStdHandle(STD_OUTPUT_HANDLE), 2); // GREEN
-            std::cout << "[서버공지] " << msg << std::endl;
-            SetConsoleTextAttribute(GetStdHandle(STD_OUTPUT_HANDLE), 7); // WHITE (Default)
+            SetConsoleTextAttribute(COL, YELLOW);
+            std::cout << msg << std::endl;
+            SetConsoleTextAttribute(COL, ORIGINAL);
         }
     }
 

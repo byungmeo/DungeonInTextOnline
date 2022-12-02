@@ -220,9 +220,9 @@ bool sendMessage(shared_ptr<Client> client, string message) {
     return true;
 }
 
-string noticeToJson(string msg) {
+string welcomeToJson(string userName) {
     char jsonData[UCHAR_MAX];
-    sprintf_s(jsonData, sizeof(jsonData), "{\"tag\": \"notice\", \"msg\": \"%s 님이 게임에 접속하였습니다.\"}", msg.c_str());
+    sprintf_s(jsonData, sizeof(jsonData), "{\"tag\": \"notice\", \"msg\": \"[ 시스템 ] : [ %s ] 님이 게임에 접속하였습니다.\"}", userName.c_str());
     return jsonData;
 }
 
@@ -293,10 +293,10 @@ bool processClient(shared_ptr<Client> client) {
         {
             unique_lock<mutex> ul(activeClientsMutex);
             for (auto& pair : activeClients) {
-                sendMessage(pair.second, noticeToJson(userName));
+                sendMessage(pair.second, welcomeToJson(userName));
 
                 // 디버깅을 위해 소켓 번호도 함께 공지
-                sendMessage(pair.second, noticeToJson(reply->str));
+                sendMessage(pair.second, welcomeToJson(reply->str));
             }
         }
         freeReplyObject(reply);
