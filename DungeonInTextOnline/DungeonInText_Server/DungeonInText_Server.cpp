@@ -311,10 +311,8 @@ bool processClient(shared_ptr<Client> client) {
         {
             unique_lock<mutex> ul(activeClientsMutex);
             for (auto& pair : activeClients) {
-                sendMessage(pair.second, welcomeToJson(userName));
-
                 // 디버깅을 위해 소켓 번호도 함께 공지
-                sendMessage(pair.second, welcomeToJson(reply->str));
+                sendMessage(pair.second, welcomeToJson(userName + ":" + reply->str));
             }
         }
         freeReplyObject(reply);
