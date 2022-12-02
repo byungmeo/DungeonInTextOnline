@@ -94,6 +94,40 @@ bool sendMessage(string message) {
     return true;
 }
 
+void printNotice(string msg) {
+    SetConsoleTextAttribute(COL, YELLOW);
+    std::cout << msg << std::endl;
+    SetConsoleTextAttribute(COL, ORIGINAL);
+}
+
+void printAttack(string attacker, string target, int damage) {
+    SetConsoleTextAttribute(COL, YELLOW);
+    cout << "[ 시스템 ] : [ ";
+    SetConsoleTextAttribute(COL, BLUE);
+    cout << attacker;
+    SetConsoleTextAttribute(COL, YELLOW);
+    cout << " ] 이 [ ";
+    SetConsoleTextAttribute(COL, RED);
+    cout << target;
+    SetConsoleTextAttribute(COL, YELLOW);
+    cout << " ] 을 공격하여 ";
+    SetConsoleTextAttribute(COL, RED);
+    cout << damage;
+    SetConsoleTextAttribute(COL, YELLOW);
+    cout << " 데미지를 가했습니다." << endl;
+    SetConsoleTextAttribute(COL, ORIGINAL);
+}
+
+void printWhisper(string sender, string msg) {
+    SetConsoleTextAttribute(COL, SKY_BLUE);
+    cout << "[ 귓속말 ] ";
+    SetConsoleTextAttribute(COL, WHITE);
+    cout << sender;
+    SetConsoleTextAttribute(COL, SKY_BLUE);
+    cout << " : " << msg << endl;
+    SetConsoleTextAttribute(COL, ORIGINAL);
+}
+
 void messageThreadProc() {
     std::cout << "Message thread is starting." << std::endl;
     while (true) {
@@ -129,41 +163,19 @@ void messageThreadProc() {
         string tag = s.GetString();
         if (tag.compare("notice") == 0) {
             string msg = (s = d["msg"]).GetString();
-            SetConsoleTextAttribute(COL, YELLOW);
-            std::cout << msg << std::endl;
-            SetConsoleTextAttribute(COL, ORIGINAL);
+            printNotice(msg);
         } else if (tag.compare("damage") == 0) {
             string attacker, target;
             int damage;
             attacker = (s = d["attacker"]).GetString();
             target = (s = d["target"]).GetString();
             damage = (s = d["damage"]).GetInt();
-            SetConsoleTextAttribute(COL, YELLOW);
-            cout << "[ 시스템 ] : [ ";
-            SetConsoleTextAttribute(COL, BLUE);
-            cout << attacker;
-            SetConsoleTextAttribute(COL, YELLOW);
-            cout << " ] 이 [ ";
-            SetConsoleTextAttribute(COL, RED);
-            cout << target;
-            SetConsoleTextAttribute(COL, YELLOW);
-            cout << " ] 을 공격하여 ";
-            SetConsoleTextAttribute(COL, RED);
-            cout << damage;
-            SetConsoleTextAttribute(COL, YELLOW);
-            cout << " 데미지를 가했습니다." << endl;
-            SetConsoleTextAttribute(COL, ORIGINAL);
+            printAttack(attacker, target, damage);
         } else if (tag.compare("whisper") == 0) {
             string sender, msg;
             sender = (s = d["sender"]).GetString();
             msg = (s = d["msg"]).GetString();
-            SetConsoleTextAttribute(COL, SKY_BLUE);
-            cout << "[ 귓속말 ] ";
-            SetConsoleTextAttribute(COL, WHITE);
-            cout << sender;
-            SetConsoleTextAttribute(COL, SKY_BLUE);
-            cout << " : " << msg << endl;
-            SetConsoleTextAttribute(COL, ORIGINAL);
+            printWhisper(sender, msg);
         }
     }
 
