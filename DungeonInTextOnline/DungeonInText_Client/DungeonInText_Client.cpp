@@ -128,6 +128,7 @@ void printWhisper(string sender, string msg) {
     SetConsoleTextAttribute(COL, ORIGINAL);
 }
 
+// TODO: 소켓이 닫히면 return하도록 수정
 void messageThreadProc() {
     std::cout << "Message thread is starting." << std::endl;
     while (true) {

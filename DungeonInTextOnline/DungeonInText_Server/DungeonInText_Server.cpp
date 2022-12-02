@@ -21,6 +21,7 @@ using namespace std;
 
 static unsigned short SERVER_PORT = 27015;
 static const int NUM_WORKER_THREADS = 10;
+static const int USER_EXPIRE_TIME = 300; // 유저 정보는 5분 뒤에 만료
 
 redisContext* c;
 
@@ -28,6 +29,8 @@ class Client {
 public:
     SOCKET sock;  // 이 클라이언트의 active socket
     mutex socketMutex;
+
+    string userName;
 
     atomic<bool> doingRecv;
 
@@ -40,6 +43,10 @@ public:
     }
 
     ~Client() {
+        // 유저 정보 만료 기한 설정(재접속 케이스인 경우 userName은 비어있게 처리)
+        if (!userName.empty()) {
+            redisReply* reply = (redisReply*)redisCommand(c, "EXPIRE USER:%s:socket %d", userName.c_str(), USER_EXPIRE_TIME);
+        }
         std::cout << "Client destroyed. Socket: " << sock << std::endl;
     }
 };
@@ -242,6 +249,15 @@ string whisperToJson(string sender, string target, string msg) {
     return jsonData;
 }
 
+void initialUser(string userName) {
+    redisReply* reply;
+    reply = (redisReply*)redisCommand(c, "DEL USER:%s:hp", userName.c_str());
+    reply = (redisReply*)redisCommand(c, "DEL USER:%s:x", userName.c_str());
+    reply = (redisReply*)redisCommand(c, "DEL USER:%s:y", userName.c_str());
+    reply = (redisReply*)redisCommand(c, "DEL USER:%s:str", userName.c_str());
+    reply = (redisReply*)redisCommand(c, "DEL USER:%s:inventory", userName.c_str());
+}
+
 bool processClient(shared_ptr<Client> client) {
     SOCKET activeSock = client->sock;
 
@@ -291,18 +307,38 @@ bool processClient(shared_ptr<Client> client) {
             }
         }
     } else if (command.compare("login") == 0) {
-        // 유저가 로그인하면 소켓 번호를 저장
+        // TODO: 모든 Redis 작업 예외처리 및 함수화
         redisReply *reply;
-        printf("SET USER:%s:socket %d\n", userName.c_str(), (int)activeSock);
-        reply = (redisReply *)redisCommand(c, "SET USER:%s:socket %d", userName.c_str(), (int)activeSock);
-        if (reply == NULL) {
-            printf("redisCommand reply is NULL: %s\n", c->errstr);
-            return false;
+
+        // 기존 접속자의 소켓 정보가 존재하는지 확인
+        reply = (redisReply *)redisCommand(c, "EXISTS USER:%s:socket", userName.c_str());
+        if (reply->integer) {
+            // 기존 접속자는 연결을 끊고 유저 정보를 유지한다.
+            reply = (redisReply*)redisCommand(c, "GET USER:%s:socket", userName.c_str());
+            SOCKET anotherSock = atoi(reply->str);
+            if (activeSock != anotherSock) {
+                unique_lock<mutex> ul(activeClientsMutex);
+                if (activeClients.count(anotherSock)) {
+                    // 소멸자로 인해 새 소켓 번호 정보가 만료되지 않도록 기존 클라이언트의 닉네임 정보를 초기화
+                    activeClients[anotherSock]->userName.clear();
+                    closesocket(anotherSock);
+                }
+            } else {
+                // 우연히 이전 접속 소켓과 번호가 같은 경우 만료 기한 설정만 취소
+                freeReplyObject(reply);
+                reply = (redisReply*)redisCommand(c, "PERSIST USER:%s:socket", userName.c_str());
+            }
+        } else {
+            // 유저 정보를 확실하게 초기화
+            initialUser(userName);
         }
-        if (reply->type == REDIS_REPLY_ERROR) {
-            printf("Command Error: %s\n", reply->str);
-            freeReplyObject(reply);
-            return false;
+        freeReplyObject(reply);
+
+        // 유저의 새 소켓 번호를 저장하고 클라이언트 객체에 유저명 정보 저장
+        reply = (redisReply *)redisCommand(c, "SET USER:%s:socket %d", userName.c_str(), (int)activeSock);
+        {
+            unique_lock<mutex> ul(activeClientsMutex);
+            activeClients[activeSock]->userName = userName;
         }
         freeReplyObject(reply);
 
