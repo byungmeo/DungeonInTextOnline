@@ -77,7 +77,7 @@ bool sendMessage(string message) {
         }
         offset += r;
     }
-    std::cout << "Sent length info: " << dataLen << std::endl;
+    //std::cout << "Sent length info: " << dataLen << std::endl;
 
     // send 로 명령어를 보낸다.
     offset = 0;
@@ -87,7 +87,7 @@ bool sendMessage(string message) {
             std::cerr << "send failed with error " << WSAGetLastError() << std::endl;
             return false;
         }
-        std::cout << "Sent " << r << " bytes" << std::endl;
+        //std::cout << "Sent " << r << " bytes" << std::endl;
         offset += r;
     }
 
@@ -115,13 +115,16 @@ void messageThreadProc() {
 
         }
 
-        std::cout << "msgThread : " << msg << std::endl;
-
         // TODO: JSON으로 된 메시지를 뜯어서 출력
         Document d;
         d.Parse(msg.c_str());
 
-        if (d.HasMember("tag") == false) continue;
+        // 태그가 없는 메시지는 디버깅 메시지로 간주하고 그대로 출력합니다.
+        if (d.HasMember("tag") == false) {
+            std::cout << "Untagged Message : " << msg << std::endl;
+            continue;
+        }
+
         Value& s = d["tag"];
         string tag = s.GetString();
         if (tag.compare("notice") == 0) {
@@ -208,7 +211,7 @@ void socketThreadProc() {
                 // network byte order 로 전송했었다.
                 // 따라서 이를 host byte order 로 변경한다.
                 int dataLen = ntohl(packetLen);
-                std::cout << "Received length info: " << dataLen << std::endl;
+                //std::cout << "Received length info: " << dataLen << std::endl;
                 packetLen = dataLen;
 
                 // 우리는 Client class 안에 packet 길이를 최대 64KB 로 제한하고 있다.

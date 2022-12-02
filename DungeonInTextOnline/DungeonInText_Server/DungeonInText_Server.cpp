@@ -117,7 +117,7 @@ bool recvLength(shared_ptr<Client> client) {
         // network byte order 로 전송했었다.
         // 따라서 이를 host byte order 로 변경한다.
         int dataLen = ntohl(client->packetLen);
-        std::cout << "[" << activeSock << "] Received length info: " << dataLen << std::endl;
+        //std::cout << "[" << activeSock << "] Received length info: " << dataLen << std::endl;
         client->packetLen = dataLen;
 
         // 우리는 Client class 안에 packet 길이를 최대 64KB 로 제한하고 있다.
@@ -162,14 +162,14 @@ bool recvPacket(shared_ptr<Client> client) {
 
     // 완성한 경우와 partial recv 인 경우를 구분해서 로그를 찍는다.
     if (client->offset == client->packetLen) {
-        std::cout << "[" << activeSock << "] Received " << client->packetLen << " bytes" << std::endl;
+        //std::cout << "[" << activeSock << "] Received " << client->packetLen << " bytes" << std::endl;
 
         // 다음 패킷을 위해 패킷 관련 정보를 초기화한다.
         client->lenCompleted = false;
         client->offset = 0;
         client->packetLen = 0;
     } else {
-        std::cout << "[" << activeSock << "] Partial recv " << r << "bytes. " << client->offset << "/" << client->packetLen << std::endl;
+        //std::cout << "[" << activeSock << "] Partial recv " << r << "bytes. " << client->offset << "/" << client->packetLen << std::endl;
     }
 
     return true;
@@ -200,7 +200,7 @@ bool sendMessage(shared_ptr<Client> client, string message) {
         }
         offset += r;
     }
-    std::cout << "Sent length info: " << dataLen << std::endl;
+    //std::cout << "Sent length info: " << dataLen << std::endl;
 
     // send 로 명령어를 보낸다.
     offset = 0;
@@ -213,7 +213,7 @@ bool sendMessage(shared_ptr<Client> client, string message) {
             std::cerr << "send failed with error " << WSAGetLastError() << std::endl;
             return false;
         }
-        std::cout << "Sent " << r << " bytes" << std::endl;
+        //std::cout << "Sent " << r << " bytes" << std::endl;
         offset += r;
     }
 
@@ -240,32 +240,30 @@ bool processClient(shared_ptr<Client> client) {
     }
 
     // TODO: JSON 파싱 후 처리
-    std::cout << "받은 원본 데이터 : " << client->packet << std::endl;
+    std::cout << "Recieve Command : " << client->packet << std::endl;
     Document d;
     d.Parse(client->packet);
     Value& s = d["command"];
     string command = s.GetString();
     s = d["userName"];
     string userName = s.GetString();
-    std::cout << "명령어 : " << command << std::endl;
-    std::cout << "유저명 : " << userName << std::endl;
+
     if (command.compare("move") == 0) {
         int x, y;
         s = d["x"];
         x = s.GetInt();
         s = d["y"];
         y = s.GetInt();
-        std::cout << "좌표 : (" << x << ", " << y << ")" << std::endl;
+        // TODO: move
     } else if (command.compare("chat") == 0) {
         string dest, msg;
         s = d["dest"];
         dest = s.GetString();
         s = d["msg"];
         msg = s.GetString();
-        std::cout << "귓속말 상대 : " << dest << std::endl;
-        std::cout << "귓속말 내용 : " << msg << std::endl;
+        // TODO: chat
     } else if (command.compare("attack") == 0) {
-        // 우선 커맨드를 그대로 다른 모든 유저에게 단순 공지
+        // TODO: attack
         {
             unique_lock<mutex> ul(activeClientsMutex);
             for (auto& pair : activeClients) {
@@ -301,9 +299,11 @@ bool processClient(shared_ptr<Client> client) {
         }
         freeReplyObject(reply);
     } else if (command.compare("monsters") == 0) {
+        // TODO: monsters
         // 일단 명령어만 그대로 보낸다
         sendMessage(client, client->packet);
     } else if (command.compare("users") == 0) {
+        // TODO: users
         // 일단 명령어만 그대로 보낸다
         sendMessage(client, client->packet);
     } else std::cout << "잘못된 명령어" << std::endl;
