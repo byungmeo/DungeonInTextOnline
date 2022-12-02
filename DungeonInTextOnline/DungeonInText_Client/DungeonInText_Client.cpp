@@ -133,6 +133,27 @@ void messageThreadProc() {
             SetConsoleTextAttribute(COL, YELLOW);
             std::cout << msg << std::endl;
             SetConsoleTextAttribute(COL, ORIGINAL);
+        } else if (tag.compare("damage") == 0) {
+            string attacker, target;
+            int damage;
+            attacker = (s = d["attacker"]).GetString();
+            target = (s = d["target"]).GetString();
+            damage = (s = d["damage"]).GetInt();
+            SetConsoleTextAttribute(COL, YELLOW);
+            cout << "[ 시스템 ] : [ ";
+            SetConsoleTextAttribute(COL, BLUE);
+            cout << attacker;
+            SetConsoleTextAttribute(COL, YELLOW);
+            cout << " ] 이 [ ";
+            SetConsoleTextAttribute(COL, RED);
+            cout << target;
+            SetConsoleTextAttribute(COL, YELLOW);
+            cout << " ] 을 공격하여 ";
+            SetConsoleTextAttribute(COL, RED);
+            cout << damage;
+            SetConsoleTextAttribute(COL, YELLOW);
+            cout << " 데미지를 가했습니다." << endl;
+            SetConsoleTextAttribute(COL, ORIGINAL);
         }
     }
 

@@ -226,6 +226,14 @@ string welcomeToJson(string userName) {
     return jsonData;
 }
 
+string attackToJson(string attacker, string target, int damage) {
+    char jsonData[UCHAR_MAX];
+    sprintf_s(jsonData, sizeof(jsonData), 
+        "{\"tag\": \"damage\", \"attacker\": \"%s\", \"target\": \"%s\", \"damage\": %d}",
+        attacker.c_str(), target.c_str(), damage);
+    return jsonData;
+}
+
 bool processClient(shared_ptr<Client> client) {
     SOCKET activeSock = client->sock;
 
@@ -267,7 +275,7 @@ bool processClient(shared_ptr<Client> client) {
         {
             unique_lock<mutex> ul(activeClientsMutex);
             for (auto& pair : activeClients) {
-                sendMessage(pair.second, client->packet);
+                sendMessage(pair.second, attackToJson(userName, "unknown", 0));
             }
         }
     } else if (command.compare("login") == 0) {
