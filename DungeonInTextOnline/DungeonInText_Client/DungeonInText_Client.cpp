@@ -128,6 +128,21 @@ void printWhisper(string sender, string msg) {
     SetConsoleTextAttribute(COL, ORIGINAL);
 }
 
+void printUserList(string json) {
+    Document d;
+    d.Parse(json.c_str());
+    Value& v = d["userList"];
+    std::cout << "========================================" << std::endl;
+    std::cout << "=               유저목록               =" << std::endl;
+    std::cout << "========================================" << std::endl;
+    std::cout << v[0].GetString() << std::endl;
+    for (SizeType i = 1; i < v.Size(); i++) {
+        std::cout << "----------------------------------------" << std::endl;
+        std::cout << v[i].GetString() << std::endl;
+    }
+    std::cout << "========================================" << std::endl;
+}
+
 // TODO: 소켓이 닫히면 return하도록 수정
 void messageThreadProc() {
     std::cout << "Message thread is starting." << std::endl;
@@ -177,6 +192,10 @@ void messageThreadProc() {
             sender = (s = d["sender"]).GetString();
             msg = (s = d["msg"]).GetString();
             printWhisper(sender, msg);
+        } else if(tag.compare("userList") == 0) {
+            printUserList(msg);
+        } else {
+            std::cout << msg << std::endl;
         }
     }
 

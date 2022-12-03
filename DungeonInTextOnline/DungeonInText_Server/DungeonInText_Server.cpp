@@ -5,9 +5,12 @@
 #include <list>
 #include <map>
 #include "rapidjson/document.h"
+#include "rapidjson/stringbuffer.h"
+#include "rapidjson/writer.h"
 #include <memory>
 #include <mutex>
 #include <queue>
+#include <set>
 #include <thread>
 
 #include <WinSock2.h>
@@ -249,13 +252,54 @@ string whisperToJson(string sender, string target, string msg) {
     return jsonData;
 }
 
+string userListToJson() {
+    Document d(kObjectType);
+    Value v(kArrayType);
+    set<string> nameSet;
+    {
+        unique_lock<mutex> ul(activeClientsMutex);
+        for (auto& pair : activeClients) {
+            nameSet.insert(pair.second->userName);
+        }
+    }
+    
+    for (string name : nameSet) {
+        redisReply* reply;
+        int x, y;
+        reply = (redisReply*)redisCommand(c, "GET USER:%s:x", name.c_str());
+        x = atoi(reply->str);
+        reply = (redisReply*)redisCommand(c, "GET USER:%s:y", name.c_str());
+        y = atoi(reply->str);
+
+        // TODO: 버퍼 사이즈 늘리기
+        char temp[UCHAR_MAX];
+        sprintf_s(temp, sizeof(temp), "유저명\t: %s\n좌표\t: (%d, %d)", name.c_str(), x, y);
+        string info = temp;
+
+        v.PushBack(
+            Value().SetString(info.c_str(), info.length(), d.GetAllocator()),
+            d.GetAllocator()
+        );
+    }
+
+    d.AddMember("tag", "userList", d.GetAllocator());
+    d.AddMember("userList", v, d.GetAllocator());
+
+    rapidjson::StringBuffer buffer;
+    buffer.Clear();
+    rapidjson::Writer<rapidjson::StringBuffer> writer(buffer);
+    d.Accept(writer);
+    std::cout << buffer.GetString() << std::endl;
+    return buffer.GetString();
+}
+
 void initialUser(string userName) {
     redisReply* reply;
-    reply = (redisReply*)redisCommand(c, "DEL USER:%s:hp", userName.c_str());
-    reply = (redisReply*)redisCommand(c, "DEL USER:%s:x", userName.c_str());
-    reply = (redisReply*)redisCommand(c, "DEL USER:%s:y", userName.c_str());
-    reply = (redisReply*)redisCommand(c, "DEL USER:%s:str", userName.c_str());
-    reply = (redisReply*)redisCommand(c, "DEL USER:%s:inventory", userName.c_str());
+    reply = (redisReply*)redisCommand(c, "SET USER:%s:hp %d", userName.c_str(), 0);
+    reply = (redisReply*)redisCommand(c, "SET USER:%s:x %d", userName.c_str(), 0);
+    reply = (redisReply*)redisCommand(c, "SET USER:%s:y %d", userName.c_str(), 0);
+    reply = (redisReply*)redisCommand(c, "SET USER:%s:str %d", userName.c_str(), 0);
+    reply = (redisReply*)redisCommand(c, "SET USER:%s:inventory %d", userName.c_str(), 0);
 }
 
 bool processClient(shared_ptr<Client> client) {
@@ -359,7 +403,7 @@ bool processClient(shared_ptr<Client> client) {
     } else if (command.compare("users") == 0) {
         // TODO: users
         // 일단 명령어만 그대로 보낸다
-        sendMessage(client, client->packet);
+        sendMessage(client, userListToJson());
     } else std::cout << "잘못된 명령어" << std::endl;
 
     return true;
