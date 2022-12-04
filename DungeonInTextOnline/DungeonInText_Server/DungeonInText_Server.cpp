@@ -38,6 +38,29 @@ std::mt19937 gen(rd());
 // 0 부터 99 까지 균등하게 나타나는 난수열을 생성하기 위해 균등 분포 정의.
 std::uniform_int_distribution<int> dis(0, 99);
 
+// 전방 선언
+class Client;
+class Slime;
+bool sendMessage(shared_ptr<Client>, string);
+string rebirthToJson(string);
+string killLogToJson(int, string);
+string attackToJson(int, string, int);
+
+map<SOCKET, shared_ptr<Client>> activeClients;
+mutex activeClientsMutex;
+
+list<shared_ptr<Slime>> slimeList;
+mutex slimeListMutex;
+
+queue<shared_ptr<Slime>> genSlimeQueue;
+mutex genSlimeQueueMutex;
+condition_variable genSlimeQueueFilledCv;
+
+// 패킷이 도착한 client 들의 큐
+queue<shared_ptr<Client> > jobQueue;
+mutex jobQueueMutex;
+condition_variable jobQueueFilledCv;
+
 class Player {
 public:
     string name;
@@ -128,21 +151,6 @@ public:
         return (abs(x - playerX) <= 1 && abs(y - playerY) <= 1);
     }
 };
-
-map<SOCKET, shared_ptr<Client> > activeClients;
-mutex activeClientsMutex;
-
-list<shared_ptr<Slime>> slimeList;
-mutex slimeListMutex;
-
-queue<shared_ptr<Slime>> genSlimeQueue;
-mutex genSlimeQueueMutex;
-condition_variable genSlimeQueueFilledCv;
-
-// 패킷이 도착한 client 들의 큐
-queue<shared_ptr<Client> > jobQueue;
-mutex jobQueueMutex;
-condition_variable jobQueueFilledCv;
 
 SOCKET createPassiveSocket() {
     // TCP socket 을 만든다.
