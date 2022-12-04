@@ -271,8 +271,6 @@ bool sendMessage(shared_ptr<Client> client, string message) {
     SOCKET activeSock = client->sock;
     int r;
 
-    // 우선 명령어를 그대로 되돌려 준다
-    // r = send(activeSock, client->packet, r, 0);
     string data = message;
     int dataLen = data.length() + 1; // 문자열의 끝을 의미하는 NULL 문자 포함
 
@@ -612,17 +610,8 @@ bool processClient(shared_ptr<Client> client) {
 
 int genSlime(int slimeId) {
     int size = 0;
-    //list<shared_ptr<Slime>> toDie;
     {
         unique_lock<mutex> ul(slimeListMutex);
-        //for (shared_ptr<Slime> slime : slimeList) {
-        //    if (slime->isDie()) {
-        //        toDie.push_back(slime);
-        //    }
-        //}
-        //for (shared_ptr<Slime> slime : toDie) {
-        //    slimeList.remove(slime);
-        //}
         size = slimeList.size();
     }
 
