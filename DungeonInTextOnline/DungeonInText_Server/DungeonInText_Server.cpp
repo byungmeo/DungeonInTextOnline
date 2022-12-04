@@ -2,6 +2,7 @@
 #include <condition_variable>
 #include <hiredis/hiredis.h>
 #include <iostream>
+#include <random>
 #include <list>
 #include <map>
 #include "rapidjson/document.h"
@@ -24,9 +25,17 @@ using namespace std;
 
 static unsigned short SERVER_PORT = 27015;
 static const int NUM_WORKER_THREADS = 10;
+static const int NUM_MAX_SLIMES = 10;
 static const int USER_EXPIRE_TIME = 300; // 유저 정보는 5분 뒤에 만료
 
 redisContext* c;
+
+// 시드값을 얻기 위한 random_device 생성.
+std::random_device rd;
+// random_device 를 통해 난수 생성 엔진을 초기화 한다.
+std::mt19937 gen(rd());
+// 0 부터 99 까지 균등하게 나타나는 난수열을 생성하기 위해 균등 분포 정의.
+std::uniform_int_distribution<int> dis(0, 99);
 
 class Client {
 public:
@@ -54,8 +63,41 @@ public:
     }
 };
 
+class Slime {
+public:
+    mutex slimeMutex;
+    int hp, x, y, str, slimeId;
+    // inventory
+    Slime(int slimeId) : slimeId(slimeId) {
+        this->hp = dis(gen) % 6 + 5; // 5 ~ 10
+        this->x = dis(gen) % 31; // 0 ~ 30
+        this->y = dis(gen) % 31; // 0 ~ 30
+        this->str = dis(gen) % 3 + 3; // 3 ~ 5
+        // have HP or STR potion
+    }
+
+    void attack() {
+
+    }
+
+    void hitBy(int damage) {
+        this->hp -= damage;
+    }
+
+    boolean isDie() {
+        return (this->hp <= 0);
+    }
+};
+
 map<SOCKET, shared_ptr<Client> > activeClients;
 mutex activeClientsMutex;
+
+list<shared_ptr<Slime>> slimeList;
+mutex slimeListMutex;
+
+queue<shared_ptr<Slime>> genSlimeQueue;
+mutex genSlimeQueueMutex;
+condition_variable genSlimeQueueFilledCv;
 
 // 패킷이 도착한 client 들의 큐
 queue<shared_ptr<Client> > jobQueue;
@@ -245,7 +287,7 @@ string attackToJson(string attacker, string target, int damage) {
 }
 
 string whisperToJson(string sender, string target, string msg) {
-    char jsonData[UCHAR_MAX];
+    char jsonData[SHRT_MAX];
     sprintf_s(jsonData, sizeof(jsonData),
         "{\"tag\": \"whisper\", \"sender\": \"%s\", \"target\": \"%s\", \"msg\": \"%s\"}",
         sender.c_str(), target.c_str(), msg.c_str());
@@ -271,8 +313,7 @@ string userListToJson() {
         reply = (redisReply*)redisCommand(c, "GET USER:%s:y", name.c_str());
         y = atoi(reply->str);
 
-        // TODO: 버퍼 사이즈 늘리기
-        char temp[UCHAR_MAX];
+        char temp[SHRT_MAX];
         sprintf_s(temp, sizeof(temp), "유저명\t: %s\n좌표\t: (%d, %d)", name.c_str(), x, y);
         string info = temp;
 
@@ -284,6 +325,39 @@ string userListToJson() {
 
     d.AddMember("tag", "userList", d.GetAllocator());
     d.AddMember("userList", v, d.GetAllocator());
+
+    rapidjson::StringBuffer buffer;
+    buffer.Clear();
+    rapidjson::Writer<rapidjson::StringBuffer> writer(buffer);
+    d.Accept(writer);
+    std::cout << buffer.GetString() << std::endl;
+    return buffer.GetString();
+}
+
+string monsterListToJson() {
+    Document d(kObjectType);
+    Value v(kArrayType);
+    {
+        unique_lock<mutex> ul(slimeListMutex);
+        for (shared_ptr<Slime> slime : slimeList) {
+            std::cout << "슬라임(" << slime->slimeId << ") 정보" << std::endl;
+            std::cout << "HP : " << slime->hp << std::endl;
+            std::cout << "위치 : (" << slime->x << ", " << slime->y << ")" << std::endl;
+            std::cout << "공격력 : " << slime->str << std::endl;
+
+            char temp[SHRT_MAX];
+            sprintf_s(temp, sizeof(temp), "슬라임%d(hp : %d)\n좌표\t: (%d, %d)", slime->slimeId, slime->hp, slime->x, slime->y);
+            string info = temp;
+
+            v.PushBack(
+                Value().SetString(info.c_str(), info.length(), d.GetAllocator()),
+                d.GetAllocator()
+            );
+        }
+    }
+
+    d.AddMember("tag", "monsterList", d.GetAllocator());
+    d.AddMember("monsterList", v, d.GetAllocator());
 
     rapidjson::StringBuffer buffer;
     buffer.Clear();
@@ -397,16 +471,92 @@ bool processClient(shared_ptr<Client> client) {
         }
         freeReplyObject(reply);
     } else if (command.compare("monsters") == 0) {
-        // TODO: monsters
-        // 일단 명령어만 그대로 보낸다
-        sendMessage(client, client->packet);
+        sendMessage(client, monsterListToJson());
     } else if (command.compare("users") == 0) {
-        // TODO: users
-        // 일단 명령어만 그대로 보낸다
         sendMessage(client, userListToJson());
     } else std::cout << "잘못된 명령어" << std::endl;
 
     return true;
+}
+
+int genSlime(int slimeId) {
+    int size = 0;
+    //list<shared_ptr<Slime>> toDie;
+    {
+        unique_lock<mutex> ul(slimeListMutex);
+        //for (shared_ptr<Slime> slime : slimeList) {
+        //    if (slime->isDie()) {
+        //        toDie.push_back(slime);
+        //    }
+        //}
+        //for (shared_ptr<Slime> slime : toDie) {
+        //    slimeList.remove(slime);
+        //}
+        size = slimeList.size();
+    }
+
+    {
+        unique_lock<mutex> ul(genSlimeQueueMutex);
+        for (int i = size + genSlimeQueue.size(); i < 10; ++i) {
+            shared_ptr<Slime> slime(new Slime(++slimeId));
+            genSlimeQueue.push(slime);
+        }
+        genSlimeQueueFilledCv.notify_all();
+    }
+    return slimeId;
+}
+
+void slimeThreadProc(int threadId) {
+    std::cout << "Slime thread is starting. threadId: " << threadId << std::endl;
+    shared_ptr<Slime> slime = NULL;
+    while (true) {
+        if (slime == NULL) {
+            {
+                unique_lock<mutex> ul(genSlimeQueueMutex);
+
+                // 슬라임이 생성되기 전까지 대기할 것이다.
+                while (genSlimeQueue.empty()) {
+                    genSlimeQueueFilledCv.wait(ul);
+                }
+
+                // 슬라임을 할당받는다.
+                slime = genSlimeQueue.front();
+                genSlimeQueue.pop();
+                {
+                    unique_lock<mutex> ul(slimeListMutex);
+                    slimeList.push_back(slime);
+                }
+            }
+        } else {
+            std::this_thread::sleep_for(std::chrono::seconds(5));
+            if (!slime->isDie()) {
+                slime->attack();
+                slime->hp -= 2;
+                if (slime->isDie()) {
+                    {
+                        unique_lock<mutex> ul(slimeListMutex);
+                        slimeList.remove(slime);
+                    }
+                    cout << "Slime(" << slime->slimeId << ") 이 죽었습니다." << endl;
+                }
+            } else {
+                slime = NULL; // 슬라임을 놓아주고 다음 슬라임 생성을 기다린다.
+            }
+        }
+    }
+    std::cout << "Slime thread is quitting. threadId: " << threadId << std::endl;
+}
+
+void gameManagerThreadProc() {
+    std::cout << "GameManager thread is starting." << std::endl;
+    int slimeId = 0;
+    while (true) {
+        // 1분에 한번씩 슬라임이 10마리가 되도록 주기적으로 생성 된다.
+        slimeId = genSlime(slimeId);
+        std::cout << "슬라임 생성 완료" << std::endl;
+        std::this_thread::sleep_for(std::chrono::minutes(1));
+    }
+    std::cout << "GameManager thread is quitting." << std::endl;
 }
 
 void workerThreadProc(int workerId) {
@@ -493,6 +643,14 @@ int main() {
         shared_ptr<thread> workerThread(new thread(workerThreadProc, i));
         threads.push_back(workerThread);
     }
+
+    list<shared_ptr<thread>> slimeThreadList;
+    for (int i = 0; i < NUM_MAX_SLIMES; ++i) {
+        shared_ptr<thread> slimeThread(new thread(slimeThreadProc, i));
+        slimeThreadList.push_back(slimeThread);
+    }
+
+    shared_ptr<thread> gameManagerThread(new thread(gameManagerThreadProc));
 
     while (true) {
         // TODO: writeSet 추가
@@ -634,7 +792,11 @@ int main() {
     for (shared_ptr<thread>& workerThread : threads) {
         workerThread->join();
     }
-
+    for (shared_ptr<thread>& slimeThread : slimeThreadList) {
+        slimeThread->join();
+    }
+    gameManagerThread->join();
+    
     // RedisContext 정리
     redisFree(c);
 
