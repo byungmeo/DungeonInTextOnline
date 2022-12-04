@@ -38,12 +38,23 @@ std::mt19937 gen(rd());
 // 0 부터 99 까지 균등하게 나타나는 난수열을 생성하기 위해 균등 분포 정의.
 std::uniform_int_distribution<int> dis(0, 99);
 
+class Player {
+public:
+    string name;
+    int hp, x, y, str;
+    
+    boolean isDie() {
+        return (this->hp <= 0);
+    }
+};
+
 class Client {
 public:
     SOCKET sock;  // 이 클라이언트의 active socket
     mutex socketMutex;
 
-    string userName;
+    shared_ptr<Player> playerInfo;
+    mutex playerInfoMutex;
 
     atomic<bool> doingRecv;
 
@@ -52,14 +63,26 @@ public:
     char packet[BUFFER_SIZE];
     int offset;
 
-    Client(SOCKET sock) : sock(sock), doingRecv(false), lenCompleted(false), packetLen(0), offset(0) {
+    Client(SOCKET sock) : sock(sock), playerInfo(new Player()), doingRecv(false), lenCompleted(false), packetLen(0), offset(0) {
     }
 
     ~Client() {
         // 유저 정보 만료 기한 설정(재접속 케이스인 경우 userName은 비어있게 처리)
-        if (!userName.empty()) {
-            redisReply* reply = (redisReply*)redisCommand(c, "EXPIRE USER:%s:socket %d", userName.c_str(), USER_EXPIRE_TIME);
+        {
+            unique_lock<mutex> ul(playerInfoMutex);
+            if (!playerInfo->name.empty()) {
+                redisReply* reply;
+                reply = (redisReply*)redisCommand(c, "EXPIRE USER:%s:socket %d", playerInfo->name.c_str(), USER_EXPIRE_TIME);
+
+                // 접속 종료 시 유저 정보를 저장해놓습니다.
+                reply = (redisReply*)redisCommand(c, "SET USER:%s:hp %d", playerInfo->name.c_str(), playerInfo->hp);
+                reply = (redisReply*)redisCommand(c, "SET USER:%s:x %d", playerInfo->name.c_str(), playerInfo->x);
+                reply = (redisReply*)redisCommand(c, "SET USER:%s:y %d", playerInfo->name.c_str(), playerInfo->y);
+                reply = (redisReply*)redisCommand(c, "SET USER:%s:str %d", playerInfo->name.c_str(), playerInfo->str);
+                freeReplyObject(reply);
+            }
         }
+        
         std::cout << "Client destroyed. Socket: " << sock << std::endl;
     }
 };
@@ -298,30 +321,27 @@ string whisperToJson(string sender, string target, string msg) {
 string userListToJson() {
     Document d(kObjectType);
     Value v(kArrayType);
-    set<string> nameSet;
     {
         unique_lock<mutex> ul(activeClientsMutex);
         for (auto& pair : activeClients) {
-            nameSet.insert(pair.second->userName);
+            string name;
+            int x, y;
+            {
+                unique_lock<mutex> ul(pair.second->playerInfoMutex);
+                name = pair.second->playerInfo->name;
+                x = pair.second->playerInfo->x;
+                y = pair.second->playerInfo->y;
+            }
+
+            char temp[BUFFER_SIZE];
+            sprintf_s(temp, sizeof(temp), "유저명\t: %s\n좌표\t: (%d, %d)", name.c_str(), x, y);
+            string info = temp;
+
+            v.PushBack(
+                Value().SetString(info.c_str(), info.length(), d.GetAllocator()),
+                d.GetAllocator()
+            );
         }
-    }
-    
-    for (string name : nameSet) {
-        redisReply* reply;
-        int x, y;
-        reply = (redisReply*)redisCommand(c, "GET USER:%s:x", name.c_str());
-        x = atoi(reply->str);
-        reply = (redisReply*)redisCommand(c, "GET USER:%s:y", name.c_str());
-        y = atoi(reply->str);
-
-        char temp[BUFFER_SIZE];
-        sprintf_s(temp, sizeof(temp), "유저명\t: %s\n좌표\t: (%d, %d)", name.c_str(), x, y);
-        string info = temp;
-
-        v.PushBack(
-            Value().SetString(info.c_str(), info.length(), d.GetAllocator()),
-            d.GetAllocator()
-        );
     }
 
     d.AddMember("tag", "userList", d.GetAllocator());
@@ -368,13 +388,37 @@ string monsterListToJson() {
     return buffer.GetString();
 }
 
-void initialUser(string userName) {
+void initialUser(string userName, shared_ptr<Client> client) {
+    shared_ptr<Player> playerInfo;
+    {
+        unique_lock<mutex> ul(client->playerInfoMutex);
+        playerInfo = client->playerInfo;
+        playerInfo->name = userName;
+        playerInfo->hp = 30; // 기본값 30
+        playerInfo->x = dis(gen) % 31; // 0 ~ 30
+        playerInfo->y = dis(gen) % 31; // 0 ~ 30
+        playerInfo->str = 3; // 기본값 3
+        // inventory
+    }
+}
+
+void loadUser(string userName, shared_ptr<Client> client) {
+    shared_ptr<Player> playerInfo;
     redisReply* reply;
-    reply = (redisReply*)redisCommand(c, "SET USER:%s:hp %d", userName.c_str(), 0);
-    reply = (redisReply*)redisCommand(c, "SET USER:%s:x %d", userName.c_str(), 0);
-    reply = (redisReply*)redisCommand(c, "SET USER:%s:y %d", userName.c_str(), 0);
-    reply = (redisReply*)redisCommand(c, "SET USER:%s:str %d", userName.c_str(), 0);
-    reply = (redisReply*)redisCommand(c, "SET USER:%s:inventory %d", userName.c_str(), 0);
+    {
+        unique_lock<mutex> ul(client->playerInfoMutex);
+        playerInfo = client->playerInfo;
+        playerInfo->name = userName;
+        reply = (redisReply*)redisCommand(c, "GET USER:%s:hp", userName.c_str());
+        playerInfo->hp = atoi(reply->str);
+        reply = (redisReply*)redisCommand(c, "GET USER:%s:x", userName.c_str());
+        playerInfo->x = atoi(reply->str);
+        reply = (redisReply*)redisCommand(c, "GET USER:%s:y", userName.c_str());
+        playerInfo->y = atoi(reply->str);
+        reply = (redisReply*)redisCommand(c, "GET USER:%s:str", userName.c_str());
+        playerInfo->str = atoi(reply->str);
+        // inventory
+    }
 }
 
 bool processClient(shared_ptr<Client> client) {
@@ -436,29 +480,32 @@ bool processClient(shared_ptr<Client> client) {
             reply = (redisReply*)redisCommand(c, "GET USER:%s:socket", userName.c_str());
             SOCKET anotherSock = atoi(reply->str);
             if (activeSock != anotherSock) {
-                unique_lock<mutex> ul(activeClientsMutex);
-                if (activeClients.count(anotherSock)) {
-                    // 소멸자로 인해 새 소켓 번호 정보가 만료되지 않도록 기존 클라이언트의 닉네임 정보를 초기화
-                    activeClients[anotherSock]->userName.clear();
-                    closesocket(anotherSock);
+                {
+                    unique_lock<mutex> ul(activeClientsMutex);
+                    if (activeClients.count(anotherSock)) {
+                        // 소멸자로 인해 새 소켓 번호 정보가 만료되지 않도록 기존 클라이언트의 닉네임 정보를 초기화
+                        {
+                            unique_lock<mutex> ul(client->playerInfoMutex);
+                            client->playerInfo->name.clear();
+                        }
+                    }
                 }
+                closesocket(anotherSock);
             } else {
                 // 우연히 이전 접속 소켓과 번호가 같은 경우 만료 기한 설정만 취소
                 freeReplyObject(reply);
                 reply = (redisReply*)redisCommand(c, "PERSIST USER:%s:socket", userName.c_str());
             }
+            // 유저 정보를 로드
+            loadUser(userName, client);
         } else {
             // 유저 정보를 확실하게 초기화
-            initialUser(userName);
+            initialUser(userName, client);
         }
         freeReplyObject(reply);
 
-        // 유저의 새 소켓 번호를 저장하고 클라이언트 객체에 유저명 정보 저장
+        // 유저의 새 소켓 번호는 바로 저장
         reply = (redisReply *)redisCommand(c, "SET USER:%s:socket %d", userName.c_str(), (int)activeSock);
-        {
-            unique_lock<mutex> ul(activeClientsMutex);
-            activeClients[activeSock]->userName = userName;
-        }
         freeReplyObject(reply);
 
         reply = (redisReply*)redisCommand(c, "GET USER:%s:socket", userName.c_str());
