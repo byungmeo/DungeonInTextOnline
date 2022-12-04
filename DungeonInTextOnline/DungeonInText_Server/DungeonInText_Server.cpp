@@ -532,14 +532,6 @@ void slimeThreadProc(int threadId) {
             std::this_thread::sleep_for(std::chrono::seconds(5));
             if (!slime->isDie()) {
                 slime->attack();
-                slime->hp -= 2;
-                if (slime->isDie()) {
-                    {
-                        unique_lock<mutex> ul(slimeListMutex);
-                        slimeList.remove(slime);
-                    }
-                    cout << "Slime(" << slime->slimeId << ") 이 죽었습니다." << endl;
-                }
             } else {
                 slime = NULL; // 슬라임을 놓아주고 다음 슬라임 생성을 기다린다.
             }
