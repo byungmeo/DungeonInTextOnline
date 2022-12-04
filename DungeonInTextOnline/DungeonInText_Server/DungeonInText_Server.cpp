@@ -377,7 +377,16 @@ string userListToJson() {
     return buffer.GetString();
 }
 
-string monsterListToJson() {
+string monsterListToJson(shared_ptr<Client> client) {
+    string attackable;
+    int x, y;
+    {
+        unique_lock<mutex> ul(client->playerInfoMutex);
+        x = client->playerInfo->x;
+        y = client->playerInfo->y;
+
+    }
+
     Document d(kObjectType);
     Value v(kArrayType);
     {
@@ -387,9 +396,9 @@ string monsterListToJson() {
             std::cout << "HP : " << slime->hp << std::endl;
             std::cout << "위치 : (" << slime->x << ", " << slime->y << ")" << std::endl;
             std::cout << "공격력 : " << slime->str << std::endl;
-
+            attackable = (slime->isRange(x, y)) ? "공격가능!" : "공격불가";
             char temp[BUFFER_SIZE];
-            sprintf_s(temp, sizeof(temp), "슬라임%d(hp : %d)\n좌표\t: (%d, %d)", slime->slimeId, slime->hp, slime->x, slime->y);
+            sprintf_s(temp, sizeof(temp), "슬라임%d(hp : %d)\n좌표\t: (%d, %d) -> %s", slime->slimeId, slime->hp, slime->x, slime->y, attackable.c_str());
             string info = temp;
 
             v.PushBack(
@@ -571,7 +580,7 @@ bool processClient(shared_ptr<Client> client) {
         }
         freeReplyObject(reply);
     } else if (command.compare("monsters") == 0) {
-        sendMessage(client, monsterListToJson());
+        sendMessage(client, monsterListToJson(client));
     } else if (command.compare("users") == 0) {
         sendMessage(client, userListToJson());
     } else std::cout << "잘못된 명령어" << std::endl;
