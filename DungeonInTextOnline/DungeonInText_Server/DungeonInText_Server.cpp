@@ -65,9 +65,19 @@ class Player {
 public:
     string name;
     int hp, x, y, str;
-    
+
+    int hitBy(int damage) {
+        this->hp -= damage;
+        if (hp < 0) return damage + hp;
+        else return damage;
+    }
+
     boolean isDie() {
         return (this->hp <= 0);
+    }
+
+    boolean isRange(int slimeX, int slimeY) {
+        return (abs(x - slimeX) <= 1 && abs(y - slimeY) <= 1);
     }
 
     void move(int x, int y) {
@@ -78,6 +88,18 @@ public:
 
         if (this->y < 0) this->y = 0;
         else if (this->y > 30) this->y = 30;
+    }
+
+    void rebirth() {
+        this->hp = 30; // 기본값 30
+        this->x = dis(gen) % 31; // 0 ~ 30
+        this->y = dis(gen) % 31; // 0 ~ 30
+        this->str = 3; // 기본값 3
+
+        unique_lock<mutex> ul(activeClientsMutex);
+        for (auto& pair : activeClients) {
+            sendMessage(pair.second, rebirthToJson(this->name));
+        }
     }
 };
 
@@ -134,7 +156,37 @@ public:
     }
 
     void attack() {
+        list<shared_ptr<Player>> toDie;
+        {
+            unique_lock<mutex> ul(activeClientsMutex);
+            for (auto& pair : activeClients) {
+                shared_ptr<Client> client = pair.second;
+                {
+                    unique_lock<mutex> ul(client->playerInfoMutex);
+                    shared_ptr<Player> player = client->playerInfo;
+                    if (!player->isDie() && player->isRange(x, y)) {
+                        int damage = player->hitBy(str);
+                        if (player->isDie()) toDie.push_back(player);
+                        for (auto& pair : activeClients) {
+                            sendMessage(pair.second, attackToJson(this->slimeId, player->name, damage));
+                        }
+                    }
+                }
+            }
+        }
 
+        for (shared_ptr<Player> player : toDie) {
+            {
+                unique_lock<mutex> ul(activeClientsMutex);
+                for (auto& pair : activeClients) {
+                    sendMessage(pair.second, killLogToJson(slimeId, player->name));
+                }
+            }
+            cout << player->name << " 님이 슬라임에게 맞아 쓰러졌습니다.." << endl;
+
+            player->rebirth();
+            cout << player->name << " 님이 다시 깨어났습니다.." << endl;
+        }
     }
 
     int hitBy(int damage) {
@@ -324,6 +376,12 @@ string welcomeToJson(string userName) {
     return jsonData;
 }
 
+string rebirthToJson(string userName) {
+    char jsonData[BUFFER_SIZE];
+    sprintf_s(jsonData, sizeof(jsonData), "{\"tag\": \"notice\", \"msg\": \"[ 시스템 ] : [ %s ] 님이 기운을 차렸습니다. 여긴 어디..?\"}", userName.c_str());
+    return jsonData;
+}
+
 string attackToJson(string attacker, string target, int damage) {
     char jsonData[BUFFER_SIZE];
     sprintf_s(jsonData, sizeof(jsonData), 
@@ -332,11 +390,27 @@ string attackToJson(string attacker, string target, int damage) {
     return jsonData;
 }
 
+string attackToJson(int slimeId, string userName, int damage) {
+    char jsonData[BUFFER_SIZE];
+    sprintf_s(jsonData, sizeof(jsonData),
+        "{\"tag\": \"damage\", \"attacker\": \"슬라임(%d)\", \"target\": \"%s\", \"damage\": %d}",
+        slimeId, userName.c_str(), damage);
+    return jsonData;
+}
+
 string attackToJson(string attacker, int slimeId, int damage) {
     char jsonData[BUFFER_SIZE];
     sprintf_s(jsonData, sizeof(jsonData),
         "{\"tag\": \"damage\", \"attacker\": \"%s\", \"target\": \"슬라임(%d)\", \"damage\": %d}",
         attacker.c_str(), slimeId, damage);
+    return jsonData;
+}
+
+string killLogToJson(int slimeId, string userName) {
+    char jsonData[BUFFER_SIZE];
+    sprintf_s(jsonData, sizeof(jsonData),
+        "{\"tag\": \"killLog\", \"killer\": \"슬라임(%d)\", \"killed\": \"%s\"}",
+        slimeId, userName.c_str());
     return jsonData;
 }
 
