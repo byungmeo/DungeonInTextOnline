@@ -263,7 +263,7 @@ void socketThreadProc() {
             break;
         } else if (r == 0) continue;
 
-        char buf[1000];
+        char buf[8192];
         if (FD_ISSET(sock, &readSet)) {
             bool lenCompleted = false;
             int packetLen = 0;

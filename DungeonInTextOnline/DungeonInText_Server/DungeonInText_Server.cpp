@@ -27,6 +27,7 @@ static unsigned short SERVER_PORT = 27015;
 static const int NUM_WORKER_THREADS = 10;
 static const int NUM_MAX_SLIMES = 10;
 static const int USER_EXPIRE_TIME = 300; // 유저 정보는 5분 뒤에 만료
+static const int BUFFER_SIZE = 8192;
 
 redisContext* c;
 
@@ -48,7 +49,7 @@ public:
 
     bool lenCompleted;
     int packetLen;
-    char packet[65536];  // 최대 64KB 로 패킷 사이즈 고정
+    char packet[BUFFER_SIZE];
     int offset;
 
     Client(SOCKET sock) : sock(sock), doingRecv(false), lenCompleted(false), packetLen(0), offset(0) {
@@ -273,13 +274,13 @@ bool sendMessage(shared_ptr<Client> client, string message) {
 }
 
 string welcomeToJson(string userName) {
-    char jsonData[UCHAR_MAX];
+    char jsonData[BUFFER_SIZE];
     sprintf_s(jsonData, sizeof(jsonData), "{\"tag\": \"notice\", \"msg\": \"[ 시스템 ] : [ %s ] 님이 게임에 접속하였습니다.\"}", userName.c_str());
     return jsonData;
 }
 
 string attackToJson(string attacker, string target, int damage) {
-    char jsonData[UCHAR_MAX];
+    char jsonData[BUFFER_SIZE];
     sprintf_s(jsonData, sizeof(jsonData), 
         "{\"tag\": \"damage\", \"attacker\": \"%s\", \"target\": \"%s\", \"damage\": %d}",
         attacker.c_str(), target.c_str(), damage);
@@ -287,7 +288,7 @@ string attackToJson(string attacker, string target, int damage) {
 }
 
 string whisperToJson(string sender, string target, string msg) {
-    char jsonData[SHRT_MAX];
+    char jsonData[BUFFER_SIZE];
     sprintf_s(jsonData, sizeof(jsonData),
         "{\"tag\": \"whisper\", \"sender\": \"%s\", \"target\": \"%s\", \"msg\": \"%s\"}",
         sender.c_str(), target.c_str(), msg.c_str());
@@ -313,7 +314,7 @@ string userListToJson() {
         reply = (redisReply*)redisCommand(c, "GET USER:%s:y", name.c_str());
         y = atoi(reply->str);
 
-        char temp[SHRT_MAX];
+        char temp[BUFFER_SIZE];
         sprintf_s(temp, sizeof(temp), "유저명\t: %s\n좌표\t: (%d, %d)", name.c_str(), x, y);
         string info = temp;
 
@@ -345,7 +346,7 @@ string monsterListToJson() {
             std::cout << "위치 : (" << slime->x << ", " << slime->y << ")" << std::endl;
             std::cout << "공격력 : " << slime->str << std::endl;
 
-            char temp[SHRT_MAX];
+            char temp[BUFFER_SIZE];
             sprintf_s(temp, sizeof(temp), "슬라임%d(hp : %d)\n좌표\t: (%d, %d)", slime->slimeId, slime->hp, slime->x, slime->y);
             string info = temp;
 
