@@ -172,6 +172,10 @@ void printKillLog(string killer, string killed) {
     SetConsoleTextAttribute(COL, ORIGINAL);
 }
 
+void printPosition(int x, int y) {
+    std::cout << "현재 위치 : (" << x << ", " << y << ")" << std::endl;
+}
+
 // TODO: 소켓이 닫히면 return하도록 수정
 void messageThreadProc() {
     std::cout << "Message thread is starting." << std::endl;
@@ -230,6 +234,11 @@ void messageThreadProc() {
             killer = (s = d["killer"]).GetString();
             killed = (s = d["killed"]).GetString();
             printKillLog(killer, killed);
+        } else if (tag.compare("position") == 0) {
+            int x, y;
+            x = (s = d["x"]).GetInt();
+            y = (s = d["y"]).GetInt();
+            printPosition(x, y);
         } else {
             std::cout << msg << std::endl;
         }
