@@ -46,6 +46,16 @@ public:
     boolean isDie() {
         return (this->hp <= 0);
     }
+
+    void move(int x, int y) {
+        this->x += x;
+        this->y += y;
+        if (this->x < 0) this->x = 0;
+        else if (this->x > 30) this->x = 30;
+
+        if (this->y < 0) this->y = 0;
+        else if (this->y > 30) this->y = 30;
+    }
 };
 
 class Client {
@@ -340,6 +350,12 @@ string whisperToJson(string sender, string target, string msg) {
     return jsonData;
 }
 
+string positionToJson(int current_x, int current_y) {
+    char jsonData[BUFFER_SIZE];
+    sprintf_s(jsonData, sizeof(jsonData), "{\"tag\": \"position\", \"x\": %d, \"y\": %d}", current_x, current_y);
+    return jsonData;
+}
+
 string userListToJson() {
     Document d(kObjectType);
     Value v(kArrayType);
@@ -480,12 +496,19 @@ bool processClient(shared_ptr<Client> client) {
         x = s.GetInt();
         s = d["y"];
         y = s.GetInt();
-        // TODO: move
+
+        int current_x, current_y;
+        {
+            unique_lock<mutex> ul(client->playerInfoMutex);
+            client->playerInfo->move(x, y);
+            current_x = client->playerInfo->x;
+            current_y = client->playerInfo->y;
+        }
+        sendMessage(client, positionToJson(current_x, current_y));
     } else if (command.compare("chat") == 0) {
         string dest, msg;
         dest = (s = d["dest"]).GetString();
         msg = (s = d["msg"]).GetString();
-        // TODO: chat
         redisReply* reply;
         reply = (redisReply*)redisCommand(c, "GET USER:%s:socket", dest.c_str());
         {
@@ -493,7 +516,6 @@ bool processClient(shared_ptr<Client> client) {
             sendMessage(activeClients[atoi(reply->str)], whisperToJson(userName, dest, msg));
         }
     } else if (command.compare("attack") == 0) {
-        // TODO: attack
         int x, y, str;
         {
             unique_lock<mutex> ul(client->playerInfoMutex);
