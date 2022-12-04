@@ -102,29 +102,29 @@ void printNotice(string msg) {
 
 void printAttack(string attacker, string target, int damage) {
     SetConsoleTextAttribute(COL, YELLOW);
-    cout << "[ 시스템 ] : [ ";
+    std::cout << "[ 시스템 ] : [ ";
     SetConsoleTextAttribute(COL, BLUE);
-    cout << attacker;
+    std::cout << attacker;
     SetConsoleTextAttribute(COL, YELLOW);
-    cout << " ] 이 [ ";
+    std::cout << " ] 이 [ ";
     SetConsoleTextAttribute(COL, RED);
-    cout << target;
+    std::cout << target;
     SetConsoleTextAttribute(COL, YELLOW);
-    cout << " ] 을 공격하여 ";
+    std::cout << " ] 을 공격하여 ";
     SetConsoleTextAttribute(COL, RED);
-    cout << damage;
+    std::cout << damage;
     SetConsoleTextAttribute(COL, YELLOW);
-    cout << " 데미지를 가했습니다." << endl;
+    std::cout << " 데미지를 가했습니다." << std::endl;
     SetConsoleTextAttribute(COL, ORIGINAL);
 }
 
 void printWhisper(string sender, string msg) {
     SetConsoleTextAttribute(COL, SKY_BLUE);
-    cout << "[ 귓속말 ] ";
+    std::cout << "[ 귓속말 ] ";
     SetConsoleTextAttribute(COL, WHITE);
-    cout << sender;
+    std::cout << sender;
     SetConsoleTextAttribute(COL, SKY_BLUE);
-    cout << " : " << msg << endl;
+    std::cout << " : " << msg << std::endl;
     SetConsoleTextAttribute(COL, ORIGINAL);
 }
 
@@ -156,6 +156,20 @@ void printMonsterList(string json) {
         std::cout << v[i].GetString() << std::endl;
     }
     std::cout << "========================================" << std::endl;
+}
+
+void printKillLog(string killer, string killed) {
+    SetConsoleTextAttribute(COL, YELLOW);
+    std::cout << "[ 시스템 ] : [ ";
+    SetConsoleTextAttribute(COL, BLUE);
+    std::cout << killer;
+    SetConsoleTextAttribute(COL, YELLOW);
+    std::cout << " ] 이 [ ";
+    SetConsoleTextAttribute(COL, RED);
+    std::cout << killed;
+    SetConsoleTextAttribute(COL, YELLOW);
+    std::cout << " ] 을 쓰러뜨렸습니다!" << std::endl;
+    SetConsoleTextAttribute(COL, ORIGINAL);
 }
 
 // TODO: 소켓이 닫히면 return하도록 수정
@@ -211,6 +225,11 @@ void messageThreadProc() {
             printUserList(msg);
         } else if (tag.compare("monsterList") == 0) {
             printMonsterList(msg);
+        } else if (tag.compare("killLog") == 0) {
+            string killer, killed;
+            killer = (s = d["killer"]).GetString();
+            killed = (s = d["killed"]).GetString();
+            printKillLog(killer, killed);
         } else {
             std::cout << msg << std::endl;
         }
