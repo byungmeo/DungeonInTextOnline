@@ -104,12 +104,18 @@ public:
 
     }
 
-    void hitBy(int damage) {
+    int hitBy(int damage) {
         this->hp -= damage;
+        if (hp < 0) return damage + hp;
+        else return damage;
     }
 
     boolean isDie() {
         return (this->hp <= 0);
+    }
+
+    boolean isRange(int playerX, int playerY) {
+        return (abs(x - playerX) <= 1 && abs(y - playerY) <= 1);
     }
 };
 
@@ -310,6 +316,22 @@ string attackToJson(string attacker, string target, int damage) {
     return jsonData;
 }
 
+string attackToJson(string attacker, int slimeId, int damage) {
+    char jsonData[BUFFER_SIZE];
+    sprintf_s(jsonData, sizeof(jsonData),
+        "{\"tag\": \"damage\", \"attacker\": \"%s\", \"target\": \"슬라임(%d)\", \"damage\": %d}",
+        attacker.c_str(), slimeId, damage);
+    return jsonData;
+}
+
+string killLogToJson(string killer, int slimeId) {
+    char jsonData[BUFFER_SIZE];
+    sprintf_s(jsonData, sizeof(jsonData),
+        "{\"tag\": \"killLog\", \"killer\": \"%s\", \"killed\": \"슬라임(%d)\"}",
+        killer.c_str(), slimeId);
+    return jsonData;
+}
+
 string whisperToJson(string sender, string target, string msg) {
     char jsonData[BUFFER_SIZE];
     sprintf_s(jsonData, sizeof(jsonData),
@@ -463,10 +485,40 @@ bool processClient(shared_ptr<Client> client) {
         }
     } else if (command.compare("attack") == 0) {
         // TODO: attack
+        int x, y, str;
         {
-            unique_lock<mutex> ul(activeClientsMutex);
-            for (auto& pair : activeClients) {
-                sendMessage(pair.second, attackToJson(userName, "unknown", 0));
+            unique_lock<mutex> ul(client->playerInfoMutex);
+            if (client->playerInfo->isDie()) return true;
+            x = client->playerInfo->x;
+            y = client->playerInfo->y;
+            str = client->playerInfo->str;
+        }
+
+        list<shared_ptr<Slime>> toDie;
+        {
+            unique_lock<mutex> ul(slimeListMutex);
+            for (shared_ptr<Slime> slime : slimeList) {
+                if (!slime->isDie() && slime->isRange(x, y)) {
+                    int damage = slime->hitBy(str);
+                    if (slime->isDie()) toDie.push_back(slime);
+                    {
+                        unique_lock<mutex> ul(activeClientsMutex);
+                        for (auto& pair : activeClients) {
+                            sendMessage(pair.second, attackToJson(userName, slime->slimeId, damage));
+                        }
+                    }
+                }
+            }
+
+            for (shared_ptr<Slime> slime : toDie) {
+                slimeList.remove(slime);
+                {
+                    unique_lock<mutex> ul(activeClientsMutex);
+                    for (auto& pair : activeClients) {
+                        sendMessage(pair.second, killLogToJson(userName, slime->slimeId));
+                    }
+                }
+                cout << "Slime(" << slime->slimeId << ") 이 죽었습니다." << endl;
             }
         }
     } else if (command.compare("login") == 0) {
