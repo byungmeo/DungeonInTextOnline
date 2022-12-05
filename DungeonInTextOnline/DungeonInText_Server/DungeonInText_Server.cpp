@@ -561,7 +561,7 @@ bool processClient(shared_ptr<Client> client) {
         return false;
     }
 
-    // TODO: JSON 파싱 후 처리
+    // JSON을 파싱해서 태그별로 처리한다.
     std::cout << "Recieve Command : " << client->packet << std::endl;
     Document d;
     d.Parse(client->packet);
@@ -847,8 +847,6 @@ int main() {
     shared_ptr<thread> gameManagerThread(new thread(gameManagerThreadProc));
 
     while (true) {
-        // TODO: writeSet 추가
-
         fd_set readSet, exceptionSet;
 
         // Initial Set

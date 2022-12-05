@@ -198,11 +198,11 @@ void messageThreadProc() {
 
         }
 
-        // TODO: JSON으로 된 메시지를 뜯어서 출력
+        // JSON으로 된 메시지를 뜯어서 태그별로 다르게 출력
         Document d;
         d.Parse(msg.c_str());
 
-        // 태그가 없는 메시지는 디버깅 메시지로 간주하고 그대로 출력합니다.
+        // 태그가 없는 메시지는 디버깅 메시지로 간주하고 그대로 출력한다.
         if (d.HasMember("tag") == false) {
             std::cout << "Untagged Message : " << msg << std::endl;
             continue;
