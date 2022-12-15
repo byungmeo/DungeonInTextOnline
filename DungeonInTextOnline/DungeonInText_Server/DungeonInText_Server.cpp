@@ -122,20 +122,19 @@ public:
     }
 
     ~Client() {
-        // 유저 정보 만료 기한 설정(재접속 케이스인 경우 userName은 비어있게 처리)
+        // 유저 정보 만료 기한 설정
         {
             unique_lock<mutex> ul(playerInfoMutex);
-            if (!playerInfo->name.empty()) {
-                redisReply* reply;
-                reply = (redisReply*)redisCommand(c, "EXPIRE USER:%s:socket %d", playerInfo->name.c_str(), USER_EXPIRE_TIME);
 
-                // 접속 종료 시 유저 정보를 저장해놓습니다.
-                reply = (redisReply*)redisCommand(c, "SET USER:%s:hp %d", playerInfo->name.c_str(), playerInfo->hp);
-                reply = (redisReply*)redisCommand(c, "SET USER:%s:x %d", playerInfo->name.c_str(), playerInfo->x);
-                reply = (redisReply*)redisCommand(c, "SET USER:%s:y %d", playerInfo->name.c_str(), playerInfo->y);
-                reply = (redisReply*)redisCommand(c, "SET USER:%s:str %d", playerInfo->name.c_str(), playerInfo->str);
-                freeReplyObject(reply);
-            }
+            redisReply* reply;
+            reply = (redisReply*)redisCommand(c, "EXPIRE USER:%s:socket %d", playerInfo->name.c_str(), USER_EXPIRE_TIME);
+
+            // 접속 종료 시 유저 정보를 저장해놓습니다.
+            reply = (redisReply*)redisCommand(c, "SET USER:%s:hp %d", playerInfo->name.c_str(), playerInfo->hp);
+            reply = (redisReply*)redisCommand(c, "SET USER:%s:x %d", playerInfo->name.c_str(), playerInfo->x);
+            reply = (redisReply*)redisCommand(c, "SET USER:%s:y %d", playerInfo->name.c_str(), playerInfo->y);
+            reply = (redisReply*)redisCommand(c, "SET USER:%s:str %d", playerInfo->name.c_str(), playerInfo->str);
+            freeReplyObject(reply);
         }
         
         std::cout << "Client destroyed. Socket: " << sock << std::endl;
@@ -634,33 +633,38 @@ bool processClient(shared_ptr<Client> client) {
         }
     } else if (command.compare("login") == 0) {
         // TODO: 모든 Redis 작업 예외처리 및 함수화
-        redisReply *reply;
+        redisReply* reply;
 
         // 기존 접속자의 소켓 정보가 존재하는지 확인
-        reply = (redisReply *)redisCommand(c, "EXISTS USER:%s:socket", userName.c_str());
+        reply = (redisReply*)redisCommand(c, "EXISTS USER:%s:socket", userName.c_str());
         if (reply->integer) {
-            // 기존 접속자는 연결을 끊고 유저 정보를 유지한다.
+            // 접속 흔적이 있다 (동접인지 아닌지는 아직 모른다)
             reply = (redisReply*)redisCommand(c, "GET USER:%s:socket", userName.c_str());
             SOCKET anotherSock = atoi(reply->str);
             if (activeSock != anotherSock) {
+                // 동접인지 아닌지 확인해야 한다.
                 {
                     unique_lock<mutex> ul(activeClientsMutex);
                     if (activeClients.count(anotherSock)) {
-                        // 소멸자로 인해 새 소켓 번호 정보가 만료되지 않도록 기존 클라이언트의 닉네임 정보를 초기화
+                        // 확실하게 동접인 상황
                         {
                             unique_lock<mutex> ul(client->playerInfoMutex);
-                            client->playerInfo->name.clear();
+                            // 정보를 그대로 이관한다. (유저 정보 객체의 소멸자가 실행되지 않을 것이다)
+                            client->playerInfo = activeClients[anotherSock]->playerInfo;
                         }
+                        // 동접 소켓은 닫는다. (알아서 activeClients에서 지워질 것이다)
+                        closesocket(anotherSock);
+                    } else {
+                        // 동접이 아닌 상황이다. 마지막 종료 전 정보를 불러온다.
+                        loadUser(userName, client);
                     }
                 }
-                closesocket(anotherSock);
             } else {
-                // 우연히 이전 접속 소켓과 번호가 같은 경우 만료 기한 설정만 취소
+                // 동접이 아니다. 우연히 이전 접속 소켓과 번호가 같은 경우라 만료 기한 설정만 취소한다.
                 freeReplyObject(reply);
                 reply = (redisReply*)redisCommand(c, "PERSIST USER:%s:socket", userName.c_str());
             }
-            // 유저 정보를 로드
-            loadUser(userName, client);
+            
         } else {
             // 유저 정보를 확실하게 초기화
             initialUser(userName, client);
@@ -668,7 +672,7 @@ bool processClient(shared_ptr<Client> client) {
         freeReplyObject(reply);
 
         // 유저의 새 소켓 번호는 바로 저장
-        reply = (redisReply *)redisCommand(c, "SET USER:%s:socket %d", userName.c_str(), (int)activeSock);
+        reply = (redisReply*)redisCommand(c, "SET USER:%s:socket %d", userName.c_str(), (int)activeSock);
         freeReplyObject(reply);
 
         reply = (redisReply*)redisCommand(c, "GET USER:%s:socket", userName.c_str());
