@@ -203,6 +203,10 @@ void printItemEffect(string item, int effect) {
     }
 }
 
+void printGetItem(string item) {
+    std::cout << "아이템 [" << item << "] 을(를) 획득하였습니다!" << std::endl;
+}
+
 // TODO: 소켓이 닫히면 return하도록 수정
 void messageThreadProc() {
     std::cout << "Message thread is starting." << std::endl;
@@ -272,6 +276,10 @@ void messageThreadProc() {
             item = (s = d["item"]).GetString();
             effect = (s = d["effect"]).GetInt();
             printItemEffect(item, effect);
+        } else if (tag.compare("getItem") == 0) {
+            string item;
+            item = (s = d["item"]).GetString();
+            printGetItem(item);
         } else {
             std::cout << msg << std::endl;
         }

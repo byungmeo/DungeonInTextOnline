@@ -109,6 +109,10 @@ public:
         else if (this->y > 30) this->y = 30;
     }
 
+    void getItem(string item) {
+        inventory[item]++;
+    }
+
     int useItem(string item) {
         if (item.compare("hp") == 0) {
             if (inventory["hp"] > 0) {
@@ -195,13 +199,24 @@ class Slime {
 public:
     mutex slimeMutex;
     int hp, x, y, str, slimeId;
+    bool haveHpPotion;
+    bool haveStrPotion;
+
     // inventory
     Slime(int slimeId) : slimeId(slimeId) {
         this->hp = dis(gen) % 6 + 5; // 5 ~ 10
         this->x = dis(gen) % 31; // 0 ~ 30
         this->y = dis(gen) % 31; // 0 ~ 30
         this->str = dis(gen) % 3 + 3; // 3 ~ 5
-        // have HP or STR potion
+
+        // HP 포션 또는 STR 포션을 갖고 태어난다
+        if (dis(gen) % 2 == 0) {
+            haveHpPotion = true;
+            haveStrPotion = false;
+        } else {
+            haveHpPotion = false;
+            haveStrPotion = true;
+        }
     }
 
     void attack() {
@@ -565,9 +580,15 @@ string monsterListToJson(shared_ptr<Client> client) {
     return buffer.GetString();
 }
 
-string itemEffectToMessage(string item, int effect) {
+string itemEffectToJson(string item, int effect) {
     char jsonData[BUFFER_SIZE];
     sprintf_s(jsonData, sizeof(jsonData), "{\"tag\": \"itemEffect\", \"item\": \"%s\", \"effect\": %d}", item.c_str(), effect);
+    return jsonData;
+}
+
+string getItemToJson(string item) {
+    char jsonData[BUFFER_SIZE];
+    sprintf_s(jsonData, sizeof(jsonData), "{\"tag\": \"getItem\", \"item\": \"%s\"}", item.c_str());
     return jsonData;
 }
 
@@ -674,6 +695,15 @@ bool processClient(shared_ptr<Client> client) {
                     int damage = slime->hitBy(str);
                     if (slime->isDie()) toDie.push_back(slime);
                     {
+                        if (slime->haveHpPotion) {
+                            client->playerInfo->getItem("hp");
+                            sendMessage(client, getItemToJson("hp"));
+                        }
+                        if (slime->haveStrPotion) {
+                            client->playerInfo->getItem("str");
+                            sendMessage(client, getItemToJson("str"));
+                        }
+
                         unique_lock<mutex> ul(activeClientsMutex);
                         for (auto& pair : activeClients) {
                             sendMessage(pair.second, attackToJson(userName, slime->slimeId, damage));
@@ -759,7 +789,7 @@ bool processClient(shared_ptr<Client> client) {
             unique_lock<mutex> ul(client->playerInfoMutex);
             effect = client->playerInfo->useItem(item);
         }
-        sendMessage(client, itemEffectToMessage(item, effect));
+        sendMessage(client, itemEffectToJson(item, effect));
     } else std::cout << "잘못된 명령어" << std::endl;
 
     return true;
