@@ -177,16 +177,29 @@ void printPosition(int x, int y) {
 }
 
 void printItemEffect(string item, int effect) {
-    if (effect == -1) {
-        std::cout << item << " 은(는) 존재하지 않는 아이템입니다. " << std::endl;
-        return;
-    }
-
-    
-    if (effect == 0) {
-        std::cout << item << " 아이템이 부족합니다." << std::endl;
+    if (item.compare("hp") == 0) {
+        if (effect == 0) {
+            std::cout << "hp 포션이 부족합니다." << std::endl;
+        } else {
+            std::cout << "hp 포션을 사용하였습니다. (hp " << effect << " 회복)" << std::endl;
+        }
+    } else if (item.compare("str") == 0) {
+        if (effect == 0) {
+            std::cout << "str 포션이 부족합니다." << std::endl;
+        } else if (effect ==  -1) {
+            std::cout << "이미 공격력 증가 버프 적용 중입니다." << std::endl;
+        } else {
+            std::cout << "str 포션을 사용하였습니다. (60초간 공격력 " << effect << " 증가)" << std::endl;
+        }
     } else {
-        std::cout << item << " 아이템을 사용하였습니다. (효과 : " << effect << ")" << std::endl;
+        if (effect == 0) {
+            std::cout << item << " 이(가) 부족합니다. " << std::endl;
+        }
+        if (effect == -1) {
+            std::cout << item << " 은(는) 존재하지 않는 아이템입니다. " << std::endl;
+        } else {
+            std::cout << item << " 을(를) 사용하였습니다. (효과 " << effect << ")" << std::endl;
+        }
     }
 }
 

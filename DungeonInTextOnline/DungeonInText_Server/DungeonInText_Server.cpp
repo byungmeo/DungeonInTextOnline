@@ -67,6 +67,24 @@ public:
     int hp, x, y, str;
     map<string, int> inventory;
 
+    bool isActivatedStrBuff;
+    chrono::system_clock::time_point strBuffStartTime;
+
+    int getStr() {
+        if (isActivatedStrBuff) {
+            chrono::duration<double>sec = chrono::system_clock::now() - strBuffStartTime;
+            if (sec.count() > 60.0) {
+                // 버프가 발동된지 60초가 지났으면 버프를 끄고 원래 공격력을 반환한다.
+                cout << "버프 끝남" << endl;
+                isActivatedStrBuff = false;
+            } else {
+                return this->str + 3;
+            }
+        }
+        
+        return this->str;
+    }
+
     int hitBy(int damage) {
         this->hp -= damage;
         if (hp < 0) return damage + hp;
@@ -97,6 +115,20 @@ public:
                 inventory["hp"]--;
                 this->hp += 10;
                 return 10;
+            }
+        } else if (item.compare("str") == 0) {
+            if (inventory["str"] > 0) {
+                if (isActivatedStrBuff) {
+                    chrono::duration<double>sec = chrono::system_clock::now() - strBuffStartTime;
+                    if (sec.count() <= 60.0) {
+                        // 버프가 아직 유효하면 사용하지 않는다
+                        return -1;
+                    }
+                }
+                this->strBuffStartTime = chrono::system_clock::now();
+                isActivatedStrBuff = true;
+                inventory["str"]--;
+                return 3;
             }
         } else {
             return -1;
@@ -549,8 +581,8 @@ void initialUser(string userName, shared_ptr<Client> client) {
         playerInfo->x = dis(gen) % 31; // 0 ~ 30
         playerInfo->y = dis(gen) % 31; // 0 ~ 30
         playerInfo->str = 3; // 기본값 3
-        // inventory
-        playerInfo->inventory["hp"] = 1;
+        playerInfo->inventory["hp"] = 1; // 기본값 1개
+        playerInfo->inventory["str"] = 1; // 기본값 1개
     }
 }
 
@@ -631,7 +663,7 @@ bool processClient(shared_ptr<Client> client) {
             if (client->playerInfo->isDie()) return true;
             x = client->playerInfo->x;
             y = client->playerInfo->y;
-            str = client->playerInfo->str;
+            str = client->playerInfo->getStr();
         }
 
         list<shared_ptr<Slime>> toDie;
