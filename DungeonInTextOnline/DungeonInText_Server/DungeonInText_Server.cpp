@@ -65,6 +65,7 @@ class Player {
 public:
     string name;
     int hp, x, y, str;
+    map<string, int> inventory;
 
     int hitBy(int damage) {
         this->hp -= damage;
@@ -90,11 +91,26 @@ public:
         else if (this->y > 30) this->y = 30;
     }
 
+    int useItem(string item) {
+        if (item.compare("hp") == 0) {
+            if (inventory["hp"] > 0) {
+                inventory["hp"]--;
+                this->hp += 10;
+                return 10;
+            }
+        } else {
+            return -1;
+        }
+
+        return 0;
+    }
+
     void rebirth() {
         this->hp = 30; // 기본값 30
         this->x = dis(gen) % 31; // 0 ~ 30
         this->y = dis(gen) % 31; // 0 ~ 30
         this->str = 3; // 기본값 3
+        this->inventory["hp"] = 1;
 
         unique_lock<mutex> ul(activeClientsMutex);
         for (auto& pair : activeClients) {
@@ -134,6 +150,8 @@ public:
             reply = (redisReply*)redisCommand(c, "SET USER:%s:x %d", playerInfo->name.c_str(), playerInfo->x);
             reply = (redisReply*)redisCommand(c, "SET USER:%s:y %d", playerInfo->name.c_str(), playerInfo->y);
             reply = (redisReply*)redisCommand(c, "SET USER:%s:str %d", playerInfo->name.c_str(), playerInfo->str);
+            reply = (redisReply*)redisCommand(c, "HSET USER:%s:inventory hp %d", playerInfo->name.c_str(), playerInfo->inventory["hp"]);
+            reply = (redisReply*)redisCommand(c, "HSET USER:%s:inventory str %d", playerInfo->name.c_str(), playerInfo->inventory["str"]);
             freeReplyObject(reply);
         }
         
@@ -514,6 +532,12 @@ string monsterListToJson(shared_ptr<Client> client) {
     return buffer.GetString();
 }
 
+string itemEffectToMessage(string item, int effect) {
+    char jsonData[BUFFER_SIZE];
+    sprintf_s(jsonData, sizeof(jsonData), "{\"tag\": \"itemEffect\", \"item\": \"%s\", \"effect\": %d}", item.c_str(), effect);
+    return jsonData;
+}
+
 void initialUser(string userName, shared_ptr<Client> client) {
     shared_ptr<Player> playerInfo;
     {
@@ -525,6 +549,7 @@ void initialUser(string userName, shared_ptr<Client> client) {
         playerInfo->y = dis(gen) % 31; // 0 ~ 30
         playerInfo->str = 3; // 기본값 3
         // inventory
+        playerInfo->inventory["hp"] = 1;
     }
 }
 
@@ -543,6 +568,10 @@ void loadUser(string userName, shared_ptr<Client> client) {
         playerInfo->y = atoi(reply->str);
         reply = (redisReply*)redisCommand(c, "GET USER:%s:str", userName.c_str());
         playerInfo->str = atoi(reply->str);
+        reply = (redisReply*)redisCommand(c, "HGET USER:%s:inventory hp", userName.c_str());
+        playerInfo->inventory["hp"] = atoi(reply->str);
+        reply = (redisReply*)redisCommand(c, "HGET USER:%s:inventory str", userName.c_str());
+        playerInfo->inventory["str"] = atoi(reply->str);
         // inventory
     }
 }
@@ -689,6 +718,15 @@ bool processClient(shared_ptr<Client> client) {
         sendMessage(client, monsterListToJson(client));
     } else if (command.compare("users") == 0) {
         sendMessage(client, userListToJson());
+    } else if (command.compare("use") == 0) {
+        string item;
+        item = (s = d["item"]).GetString();
+        int effect = 0;
+        {
+            unique_lock<mutex> ul(client->playerInfoMutex);
+            effect = client->playerInfo->useItem(item);
+        }
+        sendMessage(client, itemEffectToMessage(item, effect));
     } else std::cout << "잘못된 명령어" << std::endl;
 
     return true;

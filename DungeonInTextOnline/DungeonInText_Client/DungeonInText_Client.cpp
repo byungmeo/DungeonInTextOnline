@@ -176,6 +176,20 @@ void printPosition(int x, int y) {
     std::cout << "현재 위치 : (" << x << ", " << y << ")" << std::endl;
 }
 
+void printItemEffect(string item, int effect) {
+    if (effect == -1) {
+        std::cout << item << " 은(는) 존재하지 않는 아이템입니다. " << std::endl;
+        return;
+    }
+
+    
+    if (effect == 0) {
+        std::cout << item << " 아이템이 부족합니다." << std::endl;
+    } else {
+        std::cout << item << " 아이템을 사용하였습니다. (효과 : " << effect << ")" << std::endl;
+    }
+}
+
 // TODO: 소켓이 닫히면 return하도록 수정
 void messageThreadProc() {
     std::cout << "Message thread is starting." << std::endl;
@@ -239,6 +253,12 @@ void messageThreadProc() {
             x = (s = d["x"]).GetInt();
             y = (s = d["y"]).GetInt();
             printPosition(x, y);
+        } else if (tag.compare("itemEffect") == 0) {
+            string item;
+            int effect;
+            item = (s = d["item"]).GetString();
+            effect = (s = d["effect"]).GetInt();
+            printItemEffect(item, effect);
         } else {
             std::cout << msg << std::endl;
         }
@@ -377,6 +397,12 @@ string chatToJson(string dest, string msg) {
     return jsonData;
 }
 
+string useToJson(string item) {
+    char jsonData[UCHAR_MAX];
+    sprintf_s(jsonData, sizeof(jsonData), "{\"command\": \"use\", \"userName\": \"%s\", \"item\": \"%s\"}", userName.c_str(), item.c_str());
+    return jsonData;
+}
+
 string otherToJson(string command) {
     char jsonData[UCHAR_MAX];
     sprintf_s(jsonData, sizeof(jsonData), "{\"command\": \"%s\", \"userName\": \"%s\"}", command.c_str(), userName.c_str());
@@ -413,6 +439,11 @@ string inputCommandJson() {
             break;
         } else if (input.compare("attack") == 0 || input.compare("monsters") == 0 || input.compare("users") == 0) {
             jsonData = otherToJson(input);
+            break;
+        } else if (input.compare("use") == 0) {
+            string item;
+            cin >> item;
+            jsonData = useToJson(item);
             break;
         } else if (input.compare("bot") == 0) {
             return "bot";
