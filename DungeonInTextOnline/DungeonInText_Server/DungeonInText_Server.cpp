@@ -460,16 +460,17 @@ string userListToJson() {
         unique_lock<mutex> ul(activeClientsMutex);
         for (auto& pair : activeClients) {
             string name;
-            int x, y;
+            int x, y, hp;
             {
                 unique_lock<mutex> ul(pair.second->playerInfoMutex);
                 name = pair.second->playerInfo->name;
                 x = pair.second->playerInfo->x;
                 y = pair.second->playerInfo->y;
+                hp = pair.second->playerInfo->hp;
             }
 
             char temp[BUFFER_SIZE];
-            sprintf_s(temp, sizeof(temp), "유저명\t: %s\n좌표\t: (%d, %d)", name.c_str(), x, y);
+            sprintf_s(temp, sizeof(temp), "유저명\t: %s\n좌표\t: (%d, %d)\nHP\t: %d", name.c_str(), x, y, hp);
             string info = temp;
 
             v.PushBack(
