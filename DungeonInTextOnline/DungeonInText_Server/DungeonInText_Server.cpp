@@ -29,6 +29,14 @@ static const int NUM_MAX_SLIMES = 10;
 static const int USER_EXPIRE_TIME = 300; // 유저 정보는 5분 뒤에 만료
 static const int BUFFER_SIZE = 8192;
 
+// REST API 처리 스레드 개수 및 TCP 소켓 정보
+static const int NUM_REST_THREADS = 3;
+static const char* REST_SERVER_ADDRESS = "127.0.0.1";
+static const unsigned short REST_SERVER_PORT = 27016;
+
+// REST API 응답 테스트를 위한 고정된 response 패킷 (Content-Length도 고정)
+static const string response_packet = "HTTP/1.1 200 OK\r\nContent-Length: 8\r\nContent-Type: text/plain\r\n\r\nResponse";
+
 redisContext* c;
 
 // 시드값을 얻기 위한 random_device 생성.
