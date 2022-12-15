@@ -276,6 +276,37 @@ public:
     }
 };
 
+SOCKET createPassiveSocketREST() {
+    // REST API 통신용 TCP socket 을 만든다.
+    SOCKET passiveSock = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+    if (passiveSock == INVALID_SOCKET) {
+        std::cerr << "socket failed with error " << WSAGetLastError() << std::endl;
+        return 1;
+    }
+
+    // socket 을 특정 주소, 포트에 바인딩 한다.
+    struct sockaddr_in serverAddr;
+    memset(&serverAddr, 0, sizeof(serverAddr));
+    serverAddr.sin_family = AF_INET;
+    serverAddr.sin_port = htons(REST_SERVER_PORT);
+    inet_pton(AF_INET, REST_SERVER_ADDRESS, &serverAddr.sin_addr.s_addr);
+
+    int r = ::bind(passiveSock, (sockaddr*)&serverAddr, sizeof(serverAddr));
+    if (r == SOCKET_ERROR) {
+        std::cerr << "bind failed with error " << WSAGetLastError() << std::endl;
+        return 1;
+    }
+
+    // passive socket을 생성하고 반환한다.
+    r = listen(passiveSock, 10);
+    if (r == SOCKET_ERROR) {
+        std::cerr << "listen faijled with error " << WSAGetLastError() << std::endl;
+        return 1;
+    }
+
+    return passiveSock;
+}
+
 SOCKET createPassiveSocket() {
     // TCP socket 을 만든다.
     SOCKET passiveSock = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
