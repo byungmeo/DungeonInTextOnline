@@ -1061,7 +1061,15 @@ void workerThreadProc(int workerId) {
         // shared_ptr 은 boolean 이 필요한 곳에 쓰일 때면 null 인지 여부를 확인해준다.
         if (client) {
             SOCKET activeSock = client->sock;
-            bool successful = processClient(client);
+
+            // REST 요청은 다른 방법으로 처리한다.
+            bool successful;
+            if (client->isREST) {
+                successful = processRequest(client);
+            } else {
+                successful = processClient(client);
+            }
+            
             if (successful == false) {
                 closesocket(activeSock);
 
@@ -1112,6 +1120,8 @@ int main() {
 
     // Create passive socket
     SOCKET passiveSock = createPassiveSocket();
+    // REST API Server Passive Socket
+    SOCKET passiveSockREST = createPassiveSocketREST();
 
     list<shared_ptr<thread> > threads;
     for (int i = 0; i < NUM_WORKER_THREADS; ++i) {
@@ -1141,7 +1151,10 @@ int main() {
         // passive socket 은 기본으로 각 socket set 에 포함되어야 한다.
         FD_SET(passiveSock, &readSet);
         FD_SET(passiveSock, &exceptionSet);
+        FD_SET(passiveSockREST, &readSet);
+        FD_SET(passiveSockREST, &exceptionSet);
         maxSock = max(maxSock, passiveSock);
+        maxSock = max(maxSock, passiveSockREST);
 
         // 현재 남아있는 active socket 들에 대해서도 모두 set 에 넣어준다.
         for (auto& entry : activeClients) {
@@ -1200,6 +1213,28 @@ int main() {
                 inet_ntop(AF_INET, &(clientAddr.sin_addr), strBuf, sizeof(strBuf));
                 std::cout << "New client from " << strBuf << ":" << ntohs(clientAddr.sin_port) << ". "
                     << "Socket: " << activeSock << std::endl;
+            }
+        }
+
+        // 새 REST 연결
+        if (FD_ISSET(passiveSockREST, &readSet)) {
+            std::cout << "Waiting for a REST connection" << std::endl;
+            struct sockaddr_in clientAddr;
+            int clientAddrSize = sizeof(clientAddr);
+            SOCKET activeSock = accept(passiveSockREST, (sockaddr*)&clientAddr, &clientAddrSize);
+
+            if (activeSock == INVALID_SOCKET) {
+                std::cerr << "accept failed with error " << WSAGetLastError() << std::endl;
+                return 1;
+            } else {
+                shared_ptr<Client> newClient(new Client(activeSock));
+                newClient->isREST = true; // REST Client임을 알린다.
+                activeClients.insert(make_pair(activeSock, newClient));
+
+                char strBuf[1024];
+                inet_ntop(AF_INET, &(clientAddr.sin_addr), strBuf, sizeof(strBuf));
+                std::cout << "New REST client from " << strBuf << ":" << ntohs(clientAddr.sin_port) << ". "
+                    << "REST Socket: " << activeSock << std::endl;
             }
         }
 
