@@ -686,6 +686,32 @@ void loadUser(string userName, shared_ptr<Client> client) {
     }
 }
 
+// GET 요청을 처리하고 Response를 생성합니다.
+string createGetResponse(shared_ptr<Client> client) {
+    SOCKET activeSock = client->sock;
+
+    vector<string> params = split(split(client->packet, '?')[1], '&');
+    vector<string> p1 = split(params[0], '=');
+    vector<string> p2 = split(params[1], '=');
+    
+    string command = p1[1];
+    string userName = p2[1];
+    string json = "";
+
+    if (command.compare("users") == 0) {
+        json = userListToJson();
+    } else if (command.compare("monsters") == 0) {
+        json = monsterListToJson(client);
+    } else {
+        json = failCommandToJson("Unknown Command");
+    }
+
+    char buffer[BUFFER_SIZE];
+    sprintf_s(buffer, sizeof(buffer), "HTTP/1.1 200 OK\r\nContent-Length: %d\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n%s", json.size(), json.c_str());
+    string request = buffer;
+    return request;
+}
+
 // POST 요청을 처리하고 Response를 생성합니다.
 string createPostResponse(shared_ptr<Client> client) {
     SOCKET activeSock = client->sock;
@@ -693,7 +719,6 @@ string createPostResponse(shared_ptr<Client> client) {
     char* body = client->packet;
 
     // JSON을 파싱해서 태그별로 처리한다.
-    std::cout << "-- Recieved Body --" << std::endl << body << std::endl;
     Document d;
     d.Parse(body);
     Value& s = d["command"];
@@ -854,6 +879,8 @@ string createPostResponse(shared_ptr<Client> client) {
 bool processRequest(shared_ptr<Client> client) {
     SOCKET activeSock = client->sock;
     int r;
+    string type = "";
+    string param = "";
 
     // Header 부분을 읽는다.
     if (client->lenCompleted == false) {
@@ -895,8 +922,8 @@ bool processRequest(shared_ptr<Client> client) {
                         // 맨 첫줄
                         // [0]: 요청타입 / [1]: 파라메터 / [2]: 프로토콜버전
                         vector<string> result = split(field, ' ');
-                        string type = result[0];
-                        string param = result[1];
+                        type = result[0];
+                        param = result[1];
                         string protocol = result[2];
                         cout << "Request Type : " << type << endl;
                         cout << "Params : " << param << endl;
@@ -953,7 +980,17 @@ bool processRequest(shared_ptr<Client> client) {
         client->packetLen = 0;
 
         // Body 부분에 JSON 메시지를 담고 헤더의 Content-Length를 지정하여 Response 메시지를 만든다.
-        string response = createPostResponse(client);
+        string response;
+        if (type.compare("GET") == 0) {
+            sprintf_s(client->packet, sizeof(client->packet), param.c_str());
+            response = createGetResponse(client);
+        } else if (type.compare("POST") == 0) {
+            response = createPostResponse(client);
+        } else {
+            std::cerr << "알 수 없는 HTTP 요청 타입" << std::endl;
+            return 1;
+        }
+        
 
         // Response를 전송한다.
         int offset = 0;
