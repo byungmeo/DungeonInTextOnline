@@ -50,7 +50,6 @@ condition_variable msgQueueFilledCv;
 
 queue<string> commandQueue;
 mutex commandQueueMutex;
-condition_variable commandQueueFilledCv;
 
 // 시드값을 얻기 위한 random_device 생성.
 std::random_device rd;
@@ -483,19 +482,9 @@ string inputCommandJson() {
 void pushCommandToQueue(string command) {
     {
         lock_guard<mutex> lg(commandQueueMutex);
-
-        bool wasEmpty = commandQueue.empty();
         commandQueue.push(command);
 
-        // 그리고 worker thread 를 깨워준다.
-        // 무조건 condition variable 을 notify 해도 되는데,
-        // 해당 condition variable 은 queue 에 뭔가가 들어가서 더 이상 빈 큐가 아닐 때 쓰이므로
-        // 여기서는 무의미하게 CV 를 notify하지 않도록 큐의 길이가 0에서 1이 되는 순간 notify 를 하도록 하자.
-        if (wasEmpty) {
-            commandQueueFilledCv.notify_one();
-        }
-
-        // lock_guard 는 scope 이 벗어날 때 풀릴 것이다.
+        //cv가 필요없다
     }
 
     return;
