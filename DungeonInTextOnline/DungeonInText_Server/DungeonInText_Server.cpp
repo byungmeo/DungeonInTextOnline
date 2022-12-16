@@ -179,7 +179,9 @@ public:
     char packet[BUFFER_SIZE];
     int offset;
 
-    Client(SOCKET sock) : sock(sock), playerInfo(new Player()), doingRecv(false), lenCompleted(false), packetLen(0), offset(0) {
+    bool isREST; // REST API를 통해 접속한 클라이언트인지 여부를 저장
+
+    Client(SOCKET sock) : sock(sock), playerInfo(new Player()), doingRecv(false), lenCompleted(false), packetLen(0), offset(0), isREST(false) {
     }
 
     ~Client() {
@@ -432,6 +434,9 @@ bool recvPacket(shared_ptr<Client> client) {
 }
 
 bool sendMessage(shared_ptr<Client> client, string message) {
+    // 만약 메시지를 보내려는 대상이 REST Client인 경우 보내지 않습니다.
+    if (client->isREST) return true;
+
     SOCKET activeSock = client->sock;
     int r;
 
