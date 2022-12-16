@@ -637,6 +637,17 @@ string getItemToJson(string item) {
     return jsonData;
 }
 
+string failCommandToJson(string msg) {
+    char jsonData[BUFFER_SIZE];
+    sprintf_s(jsonData, sizeof(jsonData), "{\"tag\": \"fail\", \"msg\": \"%s\"}", msg.c_str());
+    return jsonData;
+}
+
+string completeAttackToJson() {
+    string jsonData = "{\"tag\": \"attack\", \"msg\": \"Success Attack!\"}";
+    return jsonData;
+}
+
 void initialUser(string userName, shared_ptr<Client> client) {
     shared_ptr<Player> playerInfo;
     {
@@ -675,10 +686,169 @@ void loadUser(string userName, shared_ptr<Client> client) {
     }
 }
 
-string convertToJson() {
-    char jsonData[BUFFER_SIZE];
-    sprintf_s(jsonData, sizeof(jsonData), "{\"tag\": \"position\", \"x\": %d, \"y\": %d}", 10, 10);
-    return jsonData;
+// POST 요청을 처리하고 Response를 생성합니다.
+string createPostResponse(shared_ptr<Client> client) {
+    SOCKET activeSock = client->sock;
+
+    char* body = client->packet;
+
+    // JSON을 파싱해서 태그별로 처리한다.
+    std::cout << "-- Recieved Body --" << std::endl << body << std::endl;
+    Document d;
+    d.Parse(body);
+    Value& s = d["command"];
+    string command = s.GetString();
+    s = d["userName"];
+    string userName = s.GetString();
+
+    bool needLogin = false;
+    {
+        unique_lock<mutex> ul(client->playerInfoMutex);
+        needLogin = client->playerInfo->name.empty();
+    }
+
+    if (needLogin) {
+        redisReply* reply;
+
+        // 기존 접속자의 소켓 정보가 존재하는지 확인
+        reply = (redisReply*)redisCommand(c, "EXISTS USER:%s:socket", userName.c_str());
+        if (reply->integer) {
+            // 접속 흔적이 있다 (동접인지 아닌지는 아직 모른다)
+            reply = (redisReply*)redisCommand(c, "GET USER:%s:socket", userName.c_str());
+            SOCKET anotherSock = atoi(reply->str);
+            if (activeSock != anotherSock) {
+                // 동접인지 아닌지 확인해야 한다.
+                {
+                    unique_lock<mutex> ul(activeClientsMutex);
+                    if (activeClients.count(anotherSock)) {
+                        // 확실하게 동접인 상황
+                        {
+                            unique_lock<mutex> ul(client->playerInfoMutex);
+                            // 정보를 그대로 이관한다. (유저 정보 객체의 소멸자가 실행되지 않을 것이다)
+                            client->playerInfo = activeClients[anotherSock]->playerInfo;
+                        }
+                        // 동접 소켓은 닫는다. (알아서 activeClients에서 지워질 것이다)
+                        closesocket(anotherSock);
+                    } else {
+                        // 동접이 아닌 상황이다. 마지막 종료 전 정보를 불러온다.
+                        loadUser(userName, client);
+                    }
+                }
+            } else {
+                // 동접이 아니다. 우연히 이전 접속 소켓과 번호가 같은 경우라 만료 기한 설정만 취소한다.
+                freeReplyObject(reply);
+                reply = (redisReply*)redisCommand(c, "PERSIST USER:%s:socket", userName.c_str());
+            }
+
+        } else {
+            // 유저 정보를 확실하게 초기화
+            initialUser(userName, client);
+        }
+        freeReplyObject(reply);
+
+        // 유저의 새 소켓 번호는 바로 저장
+        reply = (redisReply*)redisCommand(c, "SET USER:%s:socket %d", userName.c_str(), (int)activeSock);
+        freeReplyObject(reply);
+
+        reply = (redisReply*)redisCommand(c, "GET USER:%s:socket", userName.c_str());
+        // 유저가 로그인 하였다고 모든 유저에게 공지
+        {
+            unique_lock<mutex> ul(activeClientsMutex);
+            for (auto& pair : activeClients) {
+                // 디버깅을 위해 소켓 번호도 함께 공지
+                sendMessage(pair.second, welcomeToJson(userName + ":" + reply->str));
+            }
+        }
+        freeReplyObject(reply);
+    }
+
+    string json;
+
+    if (command.compare("move") == 0) {
+        int x, y;
+        s = d["x"];
+        x = s.GetInt();
+        s = d["y"];
+        y = s.GetInt();
+
+        int current_x, current_y;
+        {
+            unique_lock<mutex> ul(client->playerInfoMutex);
+            client->playerInfo->move(x, y);
+            current_x = client->playerInfo->x;
+            current_y = client->playerInfo->y;
+        }
+        json = positionToJson(current_x, current_y);
+    } else if (command.compare("attack") == 0) {
+        int x, y, str;
+        bool isPlayerDied;
+        {
+            unique_lock<mutex> ul(client->playerInfoMutex);
+            isPlayerDied = client->playerInfo->isDie();
+            x = client->playerInfo->x;
+            y = client->playerInfo->y;
+            str = client->playerInfo->getStr();
+        }
+
+        if (!isPlayerDied) {
+            list<shared_ptr<Slime>> toDie;
+            {
+                unique_lock<mutex> ul(slimeListMutex);
+                for (shared_ptr<Slime> slime : slimeList) {
+                    if (!slime->isDie() && slime->isRange(x, y)) {
+                        int damage = slime->hitBy(str);
+                        if (slime->isDie()) toDie.push_back(slime);
+                        {
+                            if (slime->haveHpPotion) {
+                                client->playerInfo->getItem("hp");
+                                //sendMessage(client, getItemToJson("hp"));
+                            }
+                            if (slime->haveStrPotion) {
+                                client->playerInfo->getItem("str");
+                                //sendMessage(client, getItemToJson("str"));
+                            }
+
+                            unique_lock<mutex> ul(activeClientsMutex);
+                            for (auto& pair : activeClients) {
+                                sendMessage(pair.second, attackToJson(userName, slime->slimeId, damage));
+                            }
+                        }
+                    }
+                }
+
+                for (shared_ptr<Slime> slime : toDie) {
+                    slimeList.remove(slime);
+                    {
+                        unique_lock<mutex> ul(activeClientsMutex);
+                        for (auto& pair : activeClients) {
+                            sendMessage(pair.second, killLogToJson(userName, slime->slimeId));
+                        }
+                    }
+                    cout << "Slime(" << slime->slimeId << ") 이 죽었습니다." << endl;
+                }
+            }
+
+            json = completeAttackToJson();
+        } else {
+            json = failCommandToJson("Your Died. Can't Attack");
+        }
+    } else if (command.compare("use") == 0) {
+        string item;
+        item = (s = d["item"]).GetString();
+        int effect = 0;
+        {
+            unique_lock<mutex> ul(client->playerInfoMutex);
+            effect = client->playerInfo->useItem(item);
+        }
+        json = itemEffectToJson(item, effect);
+    } else {
+        json = failCommandToJson("Unknown Command");
+    }
+
+    char buffer[BUFFER_SIZE];
+    sprintf_s(buffer, sizeof(buffer), "HTTP/1.1 200 OK\r\nContent-Length: %d\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n%s", json.size(), json.c_str());
+    string request = buffer;
+    return request;
 }
 
 bool processRequest(shared_ptr<Client> client) {
@@ -783,10 +953,7 @@ bool processRequest(shared_ptr<Client> client) {
         client->packetLen = 0;
 
         // Body 부분에 JSON 메시지를 담고 헤더의 Content-Length를 지정하여 Response 메시지를 만든다.
-        string json = convertToJson();
-        char buffer[BUFFER_SIZE];
-        sprintf_s(buffer, sizeof(buffer), "HTTP/1.1 200 OK\r\nContent-Length: %d\r\nContent-Type: application/json\r\n\r\n%s", json.size(), json.c_str());
-        string response = buffer;
+        string response = createPostResponse(client);
 
         // Response를 전송한다.
         int offset = 0;
