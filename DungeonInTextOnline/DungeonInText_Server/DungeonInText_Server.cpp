@@ -10,6 +10,7 @@
 #include "rapidjson/writer.h"
 #include <memory>
 #include <mutex>
+#include "mylib.h"
 #include <queue>
 #include <set>
 #include <thread>
