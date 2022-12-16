@@ -30,8 +30,7 @@ static const int NUM_MAX_SLIMES = 10;
 static const int USER_EXPIRE_TIME = 300; // 유저 정보는 5분 뒤에 만료
 static const int BUFFER_SIZE = 8192;
 
-// REST API 처리 스레드 개수 및 TCP 소켓 정보
-static const int NUM_REST_THREADS = 3;
+// REST API TCP 소켓 정보
 static const char* REST_SERVER_ADDRESS = "127.0.0.1";
 static const unsigned short REST_SERVER_PORT = 27016;
 
@@ -208,7 +207,6 @@ public:
 
 class Slime {
 public:
-    mutex slimeMutex;
     int hp, x, y, str, slimeId;
     bool haveHpPotion;
     bool haveStrPotion;
@@ -562,7 +560,7 @@ string userListToJson() {
             }
 
             char temp[BUFFER_SIZE];
-            sprintf_s(temp, sizeof(temp), "userName\t: %s\nposition\t: (%d, %d)\nHP\t: %d", name.c_str(), x, y, hp);
+            sprintf_s(temp, sizeof(temp), "name\t: %s\n(x, y)\t: (%d, %d)\nHP\t: %d", name.c_str(), x, y, hp);
             string info = temp;
 
             v.PushBack(
@@ -602,9 +600,9 @@ string monsterListToJson(shared_ptr<Client> client) {
             std::cout << "HP : " << slime->hp << std::endl;
             std::cout << "위치 : (" << slime->x << ", " << slime->y << ")" << std::endl;
             std::cout << "공격력 : " << slime->str << std::endl;
-            attackable = (slime->isRange(x, y)) ? "Attackable!" : "Unable Attack";
+            attackable = (slime->isRange(x, y)) ? "Attackable!" : "Out Of Range";
             char temp[BUFFER_SIZE];
-            sprintf_s(temp, sizeof(temp), "Slime%d(hp : %d)\nPosition\t: (%d, %d) -> %s", slime->slimeId, slime->hp, slime->x, slime->y, attackable.c_str());
+            sprintf_s(temp, sizeof(temp), "Slime%d(hp : %d)\n(x, y)\t: (%d, %d) -> %s", slime->slimeId, slime->hp, slime->x, slime->y, attackable.c_str());
             string info = temp;
 
             v.PushBack(
