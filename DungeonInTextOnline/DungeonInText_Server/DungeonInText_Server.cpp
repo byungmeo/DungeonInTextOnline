@@ -562,7 +562,7 @@ string userListToJson() {
             }
 
             char temp[BUFFER_SIZE];
-            sprintf_s(temp, sizeof(temp), "유저명\t: %s\n좌표\t: (%d, %d)\nHP\t: %d", name.c_str(), x, y, hp);
+            sprintf_s(temp, sizeof(temp), "userName\t: %s\nposition\t: (%d, %d)\nHP\t: %d", name.c_str(), x, y, hp);
             string info = temp;
 
             v.PushBack(
@@ -602,9 +602,9 @@ string monsterListToJson(shared_ptr<Client> client) {
             std::cout << "HP : " << slime->hp << std::endl;
             std::cout << "위치 : (" << slime->x << ", " << slime->y << ")" << std::endl;
             std::cout << "공격력 : " << slime->str << std::endl;
-            attackable = (slime->isRange(x, y)) ? "공격가능!" : "공격불가";
+            attackable = (slime->isRange(x, y)) ? "Attackable!" : "Unable Attack";
             char temp[BUFFER_SIZE];
-            sprintf_s(temp, sizeof(temp), "슬라임%d(hp : %d)\n좌표\t: (%d, %d) -> %s", slime->slimeId, slime->hp, slime->x, slime->y, attackable.c_str());
+            sprintf_s(temp, sizeof(temp), "Slime%d(hp : %d)\nPosition\t: (%d, %d) -> %s", slime->slimeId, slime->hp, slime->x, slime->y, attackable.c_str());
             string info = temp;
 
             v.PushBack(
