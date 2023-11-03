@@ -1,18 +1,16 @@
-﻿#include <chrono>
-#include <condition_variable>
-#include <hiredis/hiredis.h>
-#include <iostream>
-#include <random>
-#include <list>
-#include <map>
+﻿#include "mylib.h"
 #include "rapidjson/document.h"
 #include "rapidjson/stringbuffer.h"
 #include "rapidjson/writer.h"
+#include <chrono>
+#include <hiredis/hiredis.h>
+#include <iostream>
+#include <list>
+#include <map>
 #include <memory>
 #include <mutex>
-#include "mylib.h"
 #include <queue>
-#include <set>
+#include <random>
 #include <thread>
 
 #include <WinSock2.h>
@@ -395,12 +393,6 @@ bool recvLength(shared_ptr<Client> client) {
 bool recvPacket(shared_ptr<Client> client) {
     SOCKET activeSock = client->sock;
     int r;
-
-    // 여기까지 도달했다는 것은 packetLen 을 완성한 경우다. (== lenCompleted 가 true)
-    // packetLen 만큼 데이터를 읽으면서 완성한다.
-    if (client->lenCompleted == false) {
-        return true;
-    }
 
     {
         unique_lock<mutex> ul(client->socketMutex);
@@ -1012,14 +1004,16 @@ bool processClient(shared_ptr<Client> client) {
     SOCKET activeSock = client->sock;
 
     // packet을 받기 전 length를 먼저 받는다.
-    if (recvLength(client) == false) {
-        return false;
-    }
+    if (recvLength(client) == false) return false;
+
+    // 아직 length를 다 받지 못 한 경우
+    if (client->lenCompleted == false) return false;
 
     // packet을 받는다.
-    if (recvPacket(client) == false) {
-        return false;
-    }
+    if (recvPacket(client) == false) return false;
+
+    // 아직 packet을 다 받지 못 한 경우
+    if (client->lenCompleted == true) return false;
 
     // JSON을 파싱해서 태그별로 처리한다.
     std::cout << "Recieve Command : " << client->packet << std::endl;
