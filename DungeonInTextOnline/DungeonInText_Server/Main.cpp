@@ -1,8 +1,6 @@
 ﻿#include "mylib.h"
 #include "rapidjson/document.h"
-#include "rapidjson/stringbuffer.h"
-#include "rapidjson/writer.h"
-#include <chrono>
+
 #include <hiredis/hiredis.h>
 #include <iostream>
 #include <list>
@@ -12,7 +10,11 @@
 #include <queue>
 #include <random>
 #include <thread>
-
+#include "JsonParser.h"
+#include "Player.h"
+#include "Rng.h"
+#include "ServerCore.h"
+#include "Slime.h"
 #include <WinSock2.h>
 #include <WS2tcpip.h>
 
@@ -21,12 +23,9 @@ using namespace std;
 
 // ws2_32.lib 를 링크한다.
 #pragma comment(lib, "Ws2_32.lib")
-
-static unsigned short SERVER_PORT = 27015;
 static const int NUM_WORKER_THREADS = 10;
 static const int NUM_MAX_SLIMES = 10;
-static const int USER_EXPIRE_TIME = 300; // 유저 정보는 5분 뒤에 만료
-static const int BUFFER_SIZE = 8192;
+
 
 // REST API TCP 소켓 정보
 static const char* REST_SERVER_ADDRESS = "127.0.0.1";
@@ -36,21 +35,6 @@ static const unsigned short REST_SERVER_PORT = 27016;
 static const string response_packet = "HTTP/1.1 200 OK\r\nContent-Length: 8\r\nContent-Type: text/plain\r\n\r\nResponse";
 
 redisContext* c;
-
-// 시드값을 얻기 위한 random_device 생성.
-std::random_device rd;
-// random_device 를 통해 난수 생성 엔진을 초기화 한다.
-std::mt19937 gen(rd());
-// 0 부터 99 까지 균등하게 나타나는 난수열을 생성하기 위해 균등 분포 정의.
-std::uniform_int_distribution<int> dis(0, 99);
-
-// 전방 선언
-class Client;
-class Slime;
-bool sendMessage(shared_ptr<Client>, string);
-string rebirthToJson(string);
-string killLogToJson(int, string);
-string attackToJson(int, string, int);
 
 map<SOCKET, shared_ptr<Client>> activeClients;
 mutex activeClientsMutex;
@@ -66,214 +50,6 @@ condition_variable genSlimeQueueFilledCv;
 queue<shared_ptr<Client> > jobQueue;
 mutex jobQueueMutex;
 condition_variable jobQueueFilledCv;
-
-class Player {
-public:
-    string name;
-    int hp, x, y, str;
-    map<string, int> inventory;
-
-    bool isActivatedStrBuff;
-    chrono::system_clock::time_point strBuffStartTime;
-
-    int getStr() {
-        if (isActivatedStrBuff) {
-            chrono::duration<double>sec = chrono::system_clock::now() - strBuffStartTime;
-            if (sec.count() > 60.0) {
-                // 버프가 발동된지 60초가 지났으면 버프를 끄고 원래 공격력을 반환한다.
-                cout << "버프 끝남" << endl;
-                isActivatedStrBuff = false;
-            } else {
-                return this->str + 3;
-            }
-        }
-        
-        return this->str;
-    }
-
-    int hitBy(int damage) {
-        this->hp -= damage;
-        if (hp < 0) return damage + hp;
-        else return damage;
-    }
-
-    boolean isDie() {
-        return (this->hp <= 0);
-    }
-
-    boolean isRange(int slimeX, int slimeY) {
-        return (abs(x - slimeX) <= 1 && abs(y - slimeY) <= 1);
-    }
-
-    void move(int x, int y) {
-        this->x += x;
-        this->y += y;
-        if (this->x < 0) this->x = 0;
-        else if (this->x > 30) this->x = 30;
-
-        if (this->y < 0) this->y = 0;
-        else if (this->y > 30) this->y = 30;
-    }
-
-    void getItem(string item) {
-        inventory[item]++;
-    }
-
-    int useItem(string item) {
-        if (item.compare("hp") == 0) {
-            if (inventory["hp"] > 0) {
-                inventory["hp"]--;
-                this->hp += 10;
-                return 10;
-            }
-        } else if (item.compare("str") == 0) {
-            if (inventory["str"] > 0) {
-                if (isActivatedStrBuff) {
-                    chrono::duration<double>sec = chrono::system_clock::now() - strBuffStartTime;
-                    if (sec.count() <= 60.0) {
-                        // 버프가 아직 유효하면 사용하지 않는다
-                        return -1;
-                    }
-                }
-                this->strBuffStartTime = chrono::system_clock::now();
-                isActivatedStrBuff = true;
-                inventory["str"]--;
-                return 3;
-            }
-        } else {
-            return -1;
-        }
-
-        return 0;
-    }
-
-    void rebirth() {
-        this->hp = 30; // 기본값 30
-        this->x = dis(gen) % 31; // 0 ~ 30
-        this->y = dis(gen) % 31; // 0 ~ 30
-        this->str = 3; // 기본값 3
-        this->inventory["hp"] = 1;
-
-        unique_lock<mutex> ul(activeClientsMutex);
-        for (auto& pair : activeClients) {
-            sendMessage(pair.second, rebirthToJson(this->name));
-        }
-    }
-};
-
-class Client {
-public:
-    SOCKET sock;  // 이 클라이언트의 active socket
-    mutex socketMutex;
-
-    shared_ptr<Player> playerInfo;
-    mutex playerInfoMutex;
-
-    atomic<bool> doingRecv;
-
-    bool lenCompleted;
-    int packetLen;
-    char packet[BUFFER_SIZE];
-    int offset;
-
-    bool isREST; // REST API를 통해 접속한 클라이언트인지 여부를 저장
-
-    Client(SOCKET sock) : sock(sock), playerInfo(new Player()), doingRecv(false), lenCompleted(false), packetLen(0), offset(0), isREST(false) {
-    }
-
-    ~Client() {
-        // 유저 정보 만료 기한 설정
-        {
-            unique_lock<mutex> ul(playerInfoMutex);
-
-            redisReply* reply;
-            reply = (redisReply*)redisCommand(c, "EXPIRE USER:%s:socket %d", playerInfo->name.c_str(), USER_EXPIRE_TIME);
-
-            // 접속 종료 시 유저 정보를 저장해놓습니다.
-            reply = (redisReply*)redisCommand(c, "SET USER:%s:hp %d", playerInfo->name.c_str(), playerInfo->hp);
-            reply = (redisReply*)redisCommand(c, "SET USER:%s:x %d", playerInfo->name.c_str(), playerInfo->x);
-            reply = (redisReply*)redisCommand(c, "SET USER:%s:y %d", playerInfo->name.c_str(), playerInfo->y);
-            reply = (redisReply*)redisCommand(c, "SET USER:%s:str %d", playerInfo->name.c_str(), playerInfo->str);
-            reply = (redisReply*)redisCommand(c, "HSET USER:%s:inventory hp %d", playerInfo->name.c_str(), playerInfo->inventory["hp"]);
-            reply = (redisReply*)redisCommand(c, "HSET USER:%s:inventory str %d", playerInfo->name.c_str(), playerInfo->inventory["str"]);
-            freeReplyObject(reply);
-        }
-        
-        std::cout << "Client destroyed. Socket: " << sock << std::endl;
-    }
-};
-
-class Slime {
-public:
-    int hp, x, y, str, slimeId;
-    bool haveHpPotion;
-    bool haveStrPotion;
-
-    // inventory
-    Slime(int slimeId) : slimeId(slimeId) {
-        this->hp = dis(gen) % 6 + 5; // 5 ~ 10
-        this->x = dis(gen) % 31; // 0 ~ 30
-        this->y = dis(gen) % 31; // 0 ~ 30
-        this->str = dis(gen) % 3 + 3; // 3 ~ 5
-
-        // HP 포션 또는 STR 포션을 갖고 태어난다
-        if (dis(gen) % 2 == 0) {
-            haveHpPotion = true;
-            haveStrPotion = false;
-        } else {
-            haveHpPotion = false;
-            haveStrPotion = true;
-        }
-    }
-
-    void attack() {
-        list<shared_ptr<Player>> toDie;
-        {
-            unique_lock<mutex> ul(activeClientsMutex);
-            for (auto& pair : activeClients) {
-                shared_ptr<Client> client = pair.second;
-                {
-                    unique_lock<mutex> ul(client->playerInfoMutex);
-                    shared_ptr<Player> player = client->playerInfo;
-                    if (!player->isDie() && player->isRange(x, y)) {
-                        int damage = player->hitBy(str);
-                        if (player->isDie()) toDie.push_back(player);
-                        for (auto& pair : activeClients) {
-                            sendMessage(pair.second, attackToJson(this->slimeId, player->name, damage));
-                        }
-                    }
-                }
-            }
-        }
-
-        for (shared_ptr<Player> player : toDie) {
-            {
-                unique_lock<mutex> ul(activeClientsMutex);
-                for (auto& pair : activeClients) {
-                    sendMessage(pair.second, killLogToJson(slimeId, player->name));
-                }
-            }
-            cout << player->name << " 님이 슬라임에게 맞아 쓰러졌습니다.." << endl;
-
-            player->rebirth();
-            cout << player->name << " 님이 다시 깨어났습니다.." << endl;
-        }
-    }
-
-    int hitBy(int damage) {
-        this->hp -= damage;
-        if (hp < 0) return damage + hp;
-        else return damage;
-    }
-
-    boolean isDie() {
-        return (this->hp <= 0);
-    }
-
-    boolean isRange(int playerX, int playerY) {
-        return (abs(x - playerX) <= 1 && abs(y - playerY) <= 1);
-    }
-};
 
 SOCKET createPassiveSocketREST() {
     // REST API 통신용 TCP socket 을 만든다.
@@ -306,338 +82,6 @@ SOCKET createPassiveSocketREST() {
     return passiveSock;
 }
 
-SOCKET createPassiveSocket() {
-    // TCP socket 을 만든다.
-    SOCKET passiveSock = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
-    if (passiveSock == INVALID_SOCKET) {
-        std::cerr << "socket failed with error " << WSAGetLastError() << std::endl;
-        return 1;
-    }
-
-    // socket 을 특정 주소, 포트에 바인딩 한다.
-    struct sockaddr_in serverAddr;
-    memset(&serverAddr, 0, sizeof(serverAddr));
-    serverAddr.sin_family = AF_INET;
-    serverAddr.sin_port = htons(SERVER_PORT);
-    serverAddr.sin_addr.s_addr = htonl(INADDR_ANY);
-
-    int r = bind(passiveSock, (sockaddr*)&serverAddr, sizeof(serverAddr));
-    if (r == SOCKET_ERROR) {
-        std::cerr << "bind failed with error " << WSAGetLastError() << std::endl;
-        return 1;
-    }
-
-    // TCP 는 연결을 받는 passive socket 과 실제 통신을 할 수 있는 active socket 으로 구분된다.
-    // passive socket 은 socket() 뒤에 listen() 을 호출함으로써 만들어진다.
-    // active socket 은 passive socket 을 이용해 accept() 를 호출함으로써 만들어진다.
-    r = listen(passiveSock, 10);
-    if (r == SOCKET_ERROR) {
-        std::cerr << "listen faijled with error " << WSAGetLastError() << std::endl;
-        return 1;
-    }
-
-    return passiveSock;
-}
-
-bool recvLength(shared_ptr<Client> client) {
-    SOCKET activeSock = client->sock;
-    int r;
-
-    // 이전에 어디까지 작업했는지에 따라 다르게 처리한다.
-    // 이전에 packetLen 을 완성하지 못했다. 그걸 완성하게 한다.
-    if (client->lenCompleted == false) {
-        // 길이 정보를 받기 위해서 4바이트를 읽는다.
-        // network byte order 로 전성되기 때문에 ntohl() 을 호출한다.
-        {
-            unique_lock<mutex> ul(client->socketMutex);
-            r = recv(activeSock, (char*)&(client->packetLen) + client->offset, 4 - client->offset, 0);
-        }
-        if (r == SOCKET_ERROR) {
-            std::cerr << "recv failed with error " << WSAGetLastError() << std::endl;
-            return false;
-        } else if (r == 0) {
-            // 메뉴얼을 보면 recv() 는 소켓이 닫힌 경우 0 을 반환함을 알 수 있다.
-            // 따라서 r == 0 인 경우도 loop 을 탈출하게 해야된다.
-            std::cerr << "Socket closed: " << activeSock << std::endl;
-            return false;
-        }
-        client->offset += r;
-
-        // 완성 못했다면 다음번에 계속 시도할 것이다.
-        if (client->offset < 4) {
-            return true;
-        }
-
-        // network byte order 로 전송했었다.
-        // 따라서 이를 host byte order 로 변경한다.
-        int dataLen = ntohl(client->packetLen);
-        //std::cout << "[" << activeSock << "] Received length info: " << dataLen << std::endl;
-        client->packetLen = dataLen;
-
-        // 우리는 Client class 안에 packet 길이를 최대 64KB 로 제한하고 있다.
-        // 혹시 우리가 받을 데이터가 이것보다 큰지 확인한다.
-        // 만일 크다면 처리 불가능이므로 오류로 처리한다.
-        if (client->packetLen > sizeof(client->packet)) {
-            std::cerr << "[" << activeSock << "] Too big data: " << client->packetLen << std::endl;
-            return false;
-        }
-
-        // 이제 packetLen 을 완성했다고 기록하고 offset 을 초기화해준다.
-        client->lenCompleted = true;
-        client->offset = 0;
-    }
-
-    return true;
-}
-
-bool recvPacket(shared_ptr<Client> client) {
-    SOCKET activeSock = client->sock;
-    int r;
-
-    {
-        unique_lock<mutex> ul(client->socketMutex);
-        r = recv(activeSock, client->packet + client->offset, client->packetLen - client->offset, 0);
-    }
-    if (r == SOCKET_ERROR) {
-        std::cerr << "recv failed with error " << WSAGetLastError() << std::endl;
-        return false;
-    } else if (r == 0) {
-        // 메뉴얼을 보면 recv() 는 소켓이 닫힌 경우 0 을 반환함을 알 수 있다.
-        // 따라서 r == 0 인 경우도 loop 을 탈출하게 해야된다.
-        return false;
-    }
-    client->offset += r;
-
-    // 완성한 경우와 partial recv 인 경우를 구분해서 로그를 찍는다.
-    if (client->offset == client->packetLen) {
-        //std::cout << "[" << activeSock << "] Received " << client->packetLen << " bytes" << std::endl;
-
-        // 다음 패킷을 위해 패킷 관련 정보를 초기화한다.
-        client->lenCompleted = false;
-        client->offset = 0;
-        client->packetLen = 0;
-    } else {
-        //std::cout << "[" << activeSock << "] Partial recv " << r << "bytes. " << client->offset << "/" << client->packetLen << std::endl;
-    }
-
-    return true;
-}
-
-bool sendMessage(shared_ptr<Client> client, string message) {
-    // 만약 메시지를 보내려는 대상이 REST Client인 경우 보내지 않습니다.
-    if (client->isREST) return true;
-
-    SOCKET activeSock = client->sock;
-    int r;
-
-    string data = message;
-    int dataLen = data.length() + 1; // 문자열의 끝을 의미하는 NULL 문자 포함
-
-    // 길이를 먼저 보낸다.
-    // binary 로 4bytes 를 길이로 encoding 한다.
-    // 이 때 network byte order 로 변환하기 위해서 htonl 을 호출해야된다.
-    int dataLenNetByteOrder = htonl(dataLen);
-    int offset = 0;
-    while (offset < 4) {
-        {
-            unique_lock<mutex> ul(client->socketMutex);
-            r = send(activeSock, ((char*)&dataLenNetByteOrder) + offset, 4 - offset, 0);
-        }
-        if (r == SOCKET_ERROR) {
-            std::cerr << "failed to send length: " << WSAGetLastError() << std::endl;
-            return false;
-        }
-        offset += r;
-    }
-    //std::cout << "Sent length info: " << dataLen << std::endl;
-
-    // send 로 명령어를 보낸다.
-    offset = 0;
-    while (offset < dataLen) {
-        {
-            unique_lock<mutex> ul(client->socketMutex);
-            r = send(activeSock, data.c_str() + offset, dataLen - offset, 0);
-        }
-        if (r == SOCKET_ERROR) {
-            std::cerr << "send failed with error " << WSAGetLastError() << std::endl;
-            return false;
-        }
-        //std::cout << "Sent " << r << " bytes" << std::endl;
-        offset += r;
-    }
-
-    return true;
-}
-
-string welcomeToJson(string userName) {
-    char jsonData[BUFFER_SIZE];
-    sprintf_s(jsonData, sizeof(jsonData), "{\"tag\": \"notice\", \"msg\": \"[ 시스템 ] : [ %s ] 님이 게임에 접속하였습니다.\"}", userName.c_str());
-    return jsonData;
-}
-
-string rebirthToJson(string userName) {
-    char jsonData[BUFFER_SIZE];
-    sprintf_s(jsonData, sizeof(jsonData), "{\"tag\": \"notice\", \"msg\": \"[ 시스템 ] : [ %s ] 님이 기운을 차렸습니다. 여긴 어디..?\"}", userName.c_str());
-    return jsonData;
-}
-
-string attackToJson(string attacker, string target, int damage) {
-    char jsonData[BUFFER_SIZE];
-    sprintf_s(jsonData, sizeof(jsonData), 
-        "{\"tag\": \"damage\", \"attacker\": \"%s\", \"target\": \"%s\", \"damage\": %d}",
-        attacker.c_str(), target.c_str(), damage);
-    return jsonData;
-}
-
-string attackToJson(int slimeId, string userName, int damage) {
-    char jsonData[BUFFER_SIZE];
-    sprintf_s(jsonData, sizeof(jsonData),
-        "{\"tag\": \"damage\", \"attacker\": \"슬라임(%d)\", \"target\": \"%s\", \"damage\": %d}",
-        slimeId, userName.c_str(), damage);
-    return jsonData;
-}
-
-string attackToJson(string attacker, int slimeId, int damage) {
-    char jsonData[BUFFER_SIZE];
-    sprintf_s(jsonData, sizeof(jsonData),
-        "{\"tag\": \"damage\", \"attacker\": \"%s\", \"target\": \"슬라임(%d)\", \"damage\": %d}",
-        attacker.c_str(), slimeId, damage);
-    return jsonData;
-}
-
-string killLogToJson(int slimeId, string userName) {
-    char jsonData[BUFFER_SIZE];
-    sprintf_s(jsonData, sizeof(jsonData),
-        "{\"tag\": \"killLog\", \"killer\": \"슬라임(%d)\", \"killed\": \"%s\"}",
-        slimeId, userName.c_str());
-    return jsonData;
-}
-
-string killLogToJson(string killer, int slimeId) {
-    char jsonData[BUFFER_SIZE];
-    sprintf_s(jsonData, sizeof(jsonData),
-        "{\"tag\": \"killLog\", \"killer\": \"%s\", \"killed\": \"슬라임(%d)\"}",
-        killer.c_str(), slimeId);
-    return jsonData;
-}
-
-string whisperToJson(string sender, string target, string msg) {
-    char jsonData[BUFFER_SIZE];
-    sprintf_s(jsonData, sizeof(jsonData),
-        "{\"tag\": \"whisper\", \"sender\": \"%s\", \"target\": \"%s\", \"msg\": \"%s\"}",
-        sender.c_str(), target.c_str(), msg.c_str());
-    return jsonData;
-}
-
-string positionToJson(int current_x, int current_y) {
-    char jsonData[BUFFER_SIZE];
-    sprintf_s(jsonData, sizeof(jsonData), "{\"tag\": \"position\", \"x\": %d, \"y\": %d}", current_x, current_y);
-    return jsonData;
-}
-
-string userListToJson() {
-    Document d(kObjectType);
-    Value v(kArrayType);
-    {
-        unique_lock<mutex> ul(activeClientsMutex);
-        for (auto& pair : activeClients) {
-            string name;
-            int x, y, hp;
-            {
-                unique_lock<mutex> ul(pair.second->playerInfoMutex);
-                name = pair.second->playerInfo->name;
-                x = pair.second->playerInfo->x;
-                y = pair.second->playerInfo->y;
-                hp = pair.second->playerInfo->hp;
-            }
-
-            char temp[BUFFER_SIZE];
-            sprintf_s(temp, sizeof(temp), "name\t: %s\n(x, y)\t: (%d, %d)\nHP\t: %d", name.c_str(), x, y, hp);
-            string info = temp;
-
-            v.PushBack(
-                Value().SetString(info.c_str(), info.length(), d.GetAllocator()),
-                d.GetAllocator()
-            );
-        }
-    }
-
-    d.AddMember("tag", "userList", d.GetAllocator());
-    d.AddMember("userList", v, d.GetAllocator());
-
-    rapidjson::StringBuffer buffer;
-    buffer.Clear();
-    rapidjson::Writer<rapidjson::StringBuffer> writer(buffer);
-    d.Accept(writer);
-    std::cout << buffer.GetString() << std::endl;
-    return buffer.GetString();
-}
-
-string monsterListToJson(shared_ptr<Client> client) {
-    string attackable;
-    int x, y;
-    {
-        unique_lock<mutex> ul(client->playerInfoMutex);
-        x = client->playerInfo->x;
-        y = client->playerInfo->y;
-
-    }
-
-    Document d(kObjectType);
-    Value v(kArrayType);
-    {
-        unique_lock<mutex> ul(slimeListMutex);
-        for (shared_ptr<Slime> slime : slimeList) {
-            std::cout << "슬라임(" << slime->slimeId << ") 정보" << std::endl;
-            std::cout << "HP : " << slime->hp << std::endl;
-            std::cout << "위치 : (" << slime->x << ", " << slime->y << ")" << std::endl;
-            std::cout << "공격력 : " << slime->str << std::endl;
-            attackable = (slime->isRange(x, y)) ? "Attackable!" : "Out Of Range";
-            char temp[BUFFER_SIZE];
-            sprintf_s(temp, sizeof(temp), "Slime%d(hp : %d)\n(x, y)\t: (%d, %d) -> %s", slime->slimeId, slime->hp, slime->x, slime->y, attackable.c_str());
-            string info = temp;
-
-            v.PushBack(
-                Value().SetString(info.c_str(), info.length(), d.GetAllocator()),
-                d.GetAllocator()
-            );
-        }
-    }
-
-    d.AddMember("tag", "monsterList", d.GetAllocator());
-    d.AddMember("monsterList", v, d.GetAllocator());
-
-    rapidjson::StringBuffer buffer;
-    buffer.Clear();
-    rapidjson::Writer<rapidjson::StringBuffer> writer(buffer);
-    d.Accept(writer);
-    std::cout << buffer.GetString() << std::endl;
-    return buffer.GetString();
-}
-
-string itemEffectToJson(string item, int effect) {
-    char jsonData[BUFFER_SIZE];
-    sprintf_s(jsonData, sizeof(jsonData), "{\"tag\": \"itemEffect\", \"item\": \"%s\", \"effect\": %d}", item.c_str(), effect);
-    return jsonData;
-}
-
-string getItemToJson(string item) {
-    char jsonData[BUFFER_SIZE];
-    sprintf_s(jsonData, sizeof(jsonData), "{\"tag\": \"getItem\", \"item\": \"%s\"}", item.c_str());
-    return jsonData;
-}
-
-string failCommandToJson(string msg) {
-    char jsonData[BUFFER_SIZE];
-    sprintf_s(jsonData, sizeof(jsonData), "{\"tag\": \"fail\", \"msg\": \"%s\"}", msg.c_str());
-    return jsonData;
-}
-
-string completeAttackToJson() {
-    string jsonData = "{\"tag\": \"attack\", \"msg\": \"Success Attack!\"}";
-    return jsonData;
-}
-
 void initialUser(string userName, shared_ptr<Client> client) {
     shared_ptr<Player> playerInfo;
     {
@@ -645,8 +89,8 @@ void initialUser(string userName, shared_ptr<Client> client) {
         playerInfo = client->playerInfo;
         playerInfo->name = userName;
         playerInfo->hp = 30; // 기본값 30
-        playerInfo->x = dis(gen) % 31; // 0 ~ 30
-        playerInfo->y = dis(gen) % 31; // 0 ~ 30
+        playerInfo->x = Rng::dis(Rng::gen) % 31; // 0 ~ 30
+        playerInfo->y = Rng::dis(Rng::gen) % 31; // 0 ~ 30
         playerInfo->str = 3; // 기본값 3
         playerInfo->inventory["hp"] = 1; // 기본값 1개
         playerInfo->inventory["str"] = 1; // 기본값 1개
@@ -689,11 +133,11 @@ string createGetResponse(shared_ptr<Client> client) {
     string json = "";
 
     if (command.compare("users") == 0) {
-        json = userListToJson();
+        json = JsonParser::userListToJson(activeClientsMutex, activeClients);
     } else if (command.compare("monsters") == 0) {
-        json = monsterListToJson(client);
+        json = JsonParser::monsterListToJson(client, slimeListMutex, slimeList);
     } else {
-        json = failCommandToJson("Unknown Command");
+        json = JsonParser::failCommandToJson("Unknown Command");
     }
 
     char buffer[BUFFER_SIZE];
@@ -771,7 +215,7 @@ string createPostResponse(shared_ptr<Client> client) {
             unique_lock<mutex> ul(activeClientsMutex);
             for (auto& pair : activeClients) {
                 // 디버깅을 위해 소켓 번호도 함께 공지
-                sendMessage(pair.second, welcomeToJson(userName + ":" + reply->str));
+                SendMsg(pair.second, JsonParser::welcomeToJson(userName + ":" + reply->str));
             }
         }
         freeReplyObject(reply);
@@ -793,7 +237,7 @@ string createPostResponse(shared_ptr<Client> client) {
             current_x = client->playerInfo->x;
             current_y = client->playerInfo->y;
         }
-        json = positionToJson(current_x, current_y);
+        json = JsonParser::positionToJson(current_x, current_y);
     } else if (command.compare("attack") == 0) {
         int x, y, str;
         bool isPlayerDied;
@@ -825,7 +269,7 @@ string createPostResponse(shared_ptr<Client> client) {
 
                             unique_lock<mutex> ul(activeClientsMutex);
                             for (auto& pair : activeClients) {
-                                sendMessage(pair.second, attackToJson(userName, slime->slimeId, damage));
+                                SendMsg(pair.second, JsonParser::attackToJson(userName, slime->slimeId, damage));
                             }
                         }
                     }
@@ -836,16 +280,16 @@ string createPostResponse(shared_ptr<Client> client) {
                     {
                         unique_lock<mutex> ul(activeClientsMutex);
                         for (auto& pair : activeClients) {
-                            sendMessage(pair.second, killLogToJson(userName, slime->slimeId));
+                            SendMsg(pair.second, JsonParser::killLogToJson(userName, slime->slimeId));
                         }
                     }
                     cout << "Slime(" << slime->slimeId << ") 이 죽었습니다." << endl;
                 }
             }
 
-            json = completeAttackToJson();
+            json = JsonParser::completeAttackToJson();
         } else {
-            json = failCommandToJson("Your Died. Can't Attack");
+            json = JsonParser::failCommandToJson("Your Died. Can't Attack");
         }
     } else if (command.compare("use") == 0) {
         string item;
@@ -855,9 +299,9 @@ string createPostResponse(shared_ptr<Client> client) {
             unique_lock<mutex> ul(client->playerInfoMutex);
             effect = client->playerInfo->useItem(item);
         }
-        json = itemEffectToJson(item, effect);
+        json = JsonParser::itemEffectToJson(item, effect);
     } else {
-        json = failCommandToJson("Unknown Command");
+        json = JsonParser::failCommandToJson("Unknown Command");
     }
 
     char buffer[BUFFER_SIZE];
@@ -868,7 +312,7 @@ string createPostResponse(shared_ptr<Client> client) {
 
 bool processRequest(shared_ptr<Client> client) {
     SOCKET activeSock = client->sock;
-    int r;
+    int r = 0;
     string type = "";
     string param = "";
 
@@ -1004,13 +448,13 @@ bool processClient(shared_ptr<Client> client) {
     SOCKET activeSock = client->sock;
 
     // packet을 받기 전 length를 먼저 받는다.
-    if (recvLength(client) == false) return false;
+    if (RecvLength(client) == false) return false;
 
     // 아직 length를 다 받지 못 한 경우
     if (client->lenCompleted == false) return false;
 
     // packet을 받는다.
-    if (recvPacket(client) == false) return false;
+    if (RecvPacket(client) == false) return false;
 
     // 아직 packet을 다 받지 못 한 경우
     if (client->lenCompleted == true) return false;
@@ -1038,7 +482,7 @@ bool processClient(shared_ptr<Client> client) {
             current_x = client->playerInfo->x;
             current_y = client->playerInfo->y;
         }
-        sendMessage(client, positionToJson(current_x, current_y));
+        SendMsg(client, JsonParser::positionToJson(current_x, current_y));
     } else if (command.compare("chat") == 0) {
         string dest, msg;
         dest = (s = d["dest"]).GetString();
@@ -1047,7 +491,7 @@ bool processClient(shared_ptr<Client> client) {
         reply = (redisReply*)redisCommand(c, "GET USER:%s:socket", dest.c_str());
         {
             unique_lock<mutex> ul(activeClientsMutex);
-            sendMessage(activeClients[atoi(reply->str)], whisperToJson(userName, dest, msg));
+            SendMsg(activeClients[atoi(reply->str)], JsonParser::whisperToJson(userName, dest, msg));
         }
     } else if (command.compare("attack") == 0) {
         int x, y, str;
@@ -1069,16 +513,16 @@ bool processClient(shared_ptr<Client> client) {
                     {
                         if (slime->haveHpPotion) {
                             client->playerInfo->getItem("hp");
-                            sendMessage(client, getItemToJson("hp"));
+                            SendMsg(client, JsonParser::getItemToJson("hp"));
                         }
                         if (slime->haveStrPotion) {
                             client->playerInfo->getItem("str");
-                            sendMessage(client, getItemToJson("str"));
+                            SendMsg(client, JsonParser::getItemToJson("str"));
                         }
 
                         unique_lock<mutex> ul(activeClientsMutex);
                         for (auto& pair : activeClients) {
-                            sendMessage(pair.second, attackToJson(userName, slime->slimeId, damage));
+                            SendMsg(pair.second, JsonParser::attackToJson(userName, slime->slimeId, damage));
                         }
                     }
                 }
@@ -1089,7 +533,7 @@ bool processClient(shared_ptr<Client> client) {
                 {
                     unique_lock<mutex> ul(activeClientsMutex);
                     for (auto& pair : activeClients) {
-                        sendMessage(pair.second, killLogToJson(userName, slime->slimeId));
+                        SendMsg(pair.second, JsonParser::killLogToJson(userName, slime->slimeId));
                     }
                 }
                 cout << "Slime(" << slime->slimeId << ") 이 죽었습니다." << endl;
@@ -1145,14 +589,14 @@ bool processClient(shared_ptr<Client> client) {
             unique_lock<mutex> ul(activeClientsMutex);
             for (auto& pair : activeClients) {
                 // 디버깅을 위해 소켓 번호도 함께 공지
-                sendMessage(pair.second, welcomeToJson(userName + ":" + reply->str));
+                SendMsg(pair.second, JsonParser::welcomeToJson(userName + ":" + reply->str));
             }
         }
         freeReplyObject(reply);
     } else if (command.compare("monsters") == 0) {
-        sendMessage(client, monsterListToJson(client));
+        SendMsg(client, JsonParser::monsterListToJson(client, slimeListMutex, slimeList));
     } else if (command.compare("users") == 0) {
-        sendMessage(client, userListToJson());
+        SendMsg(client, JsonParser::userListToJson(activeClientsMutex, activeClients));
     } else if (command.compare("use") == 0) {
         string item;
         item = (s = d["item"]).GetString();
@@ -1161,7 +605,7 @@ bool processClient(shared_ptr<Client> client) {
             unique_lock<mutex> ul(client->playerInfoMutex);
             effect = client->playerInfo->useItem(item);
         }
-        sendMessage(client, itemEffectToJson(item, effect));
+        SendMsg(client, JsonParser::itemEffectToJson(item, effect));
     } else std::cout << "잘못된 명령어" << std::endl;
 
     return true;
@@ -1209,7 +653,7 @@ void slimeThreadProc(int threadId) {
         } else {
             std::this_thread::sleep_for(std::chrono::seconds(5));
             if (!slime->isDie()) {
-                slime->attack();
+                slime->attack(activeClientsMutex, activeClients);
             } else {
                 slime = NULL; // 슬라임을 놓아주고 다음 슬라임 생성을 기다린다.
             }
@@ -1315,7 +759,7 @@ int main() {
     }
 
     // Create passive socket
-    SOCKET passiveSock = createPassiveSocket();
+    SOCKET passiveSock = CreatePassiveSocket();
     // REST API Server Passive Socket
     SOCKET passiveSockREST = createPassiveSocketREST();
 
@@ -1399,7 +843,7 @@ int main() {
                 return 1;
             } else {
                 // 새로 client 객체를 만든다.
-                shared_ptr<Client> newClient(new Client(activeSock));
+                shared_ptr<Client> newClient(new Client(activeSock, c));
 
                 // socket 을 key 로 하고 해당 객체 포인터를 value 로 하는 map 에 집어 넣는다.
                 activeClients.insert(make_pair(activeSock, newClient));
@@ -1415,7 +859,7 @@ int main() {
         // 새 REST 연결
         if (FD_ISSET(passiveSockREST, &readSet)) {
             std::cout << "Waiting for a REST connection" << std::endl;
-            struct sockaddr_in clientAddr;
+            struct sockaddr_in clientAddr {};
             int clientAddrSize = sizeof(clientAddr);
             SOCKET activeSock = accept(passiveSockREST, (sockaddr*)&clientAddr, &clientAddrSize);
 
@@ -1423,7 +867,7 @@ int main() {
                 std::cerr << "accept failed with error " << WSAGetLastError() << std::endl;
                 return 1;
             } else {
-                shared_ptr<Client> newClient(new Client(activeSock));
+                shared_ptr<Client> newClient(new Client(activeSock, c));
                 newClient->isREST = true; // REST Client임을 알린다.
                 activeClients.insert(make_pair(activeSock, newClient));
 

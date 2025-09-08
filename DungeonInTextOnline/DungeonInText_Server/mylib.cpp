@@ -1,4 +1,5 @@
 #include "mylib.h"
+#include <sstream>
 
 // 특정 문자를 기준으로 문자열을 나눔
 std::vector<std::string> split(std::string input, char delimiter) {
