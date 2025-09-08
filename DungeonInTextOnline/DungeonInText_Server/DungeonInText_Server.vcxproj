@@ -140,6 +140,7 @@
     <ClCompile Include="Player.cpp" />
     <ClCompile Include="ServerCore.cpp" />
     <ClCompile Include="Slime.cpp" />
+    <ClCompile Include="WebCore.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="Client.h" />
@@ -149,6 +150,7 @@
     <ClInclude Include="Rng.h" />
     <ClInclude Include="ServerCore.h" />
     <ClInclude Include="Slime.h" />
+    <ClInclude Include="WebCore.h" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">
