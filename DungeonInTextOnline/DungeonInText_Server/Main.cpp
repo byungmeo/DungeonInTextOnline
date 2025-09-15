@@ -729,12 +729,16 @@ int main() {
     // REST API Server Passive Socket
     SOCKET passiveSockREST = CreatePassiveSocketREST();
 
+    // jobQueue에 들어있는 job을 빼내 작업을 수행하는 워커 스레드를 적정 수만큼 생성한다
+    // TODO: 성능 개선을 위해 게임 로직 스레드에서 중앙 집중형으로(단일 스레드) 처리하도록 수정 예정
     list<shared_ptr<thread> > threads;
     for (int i = 0; i < NUM_WORKER_THREADS; ++i) {
         shared_ptr<thread> workerThread(new thread(workerThreadProc, i));
         threads.push_back(workerThread);
     }
 
+    // 각 슬라임의 행동을 수행할 스레드를 생성한다.
+    // TODO: 성능 개선을 위해 게임 로직 스레드에서 중앙 집중형으로(단일 스레드) 처리하도록 수정 예정
     list<shared_ptr<thread>> slimeThreadList;
     for (int i = 0; i < NUM_MAX_SLIMES; ++i) {
         shared_ptr<thread> slimeThread(new thread(slimeThreadProc, i));
@@ -822,7 +826,7 @@ int main() {
             }
         }
 
-        // 새 REST 연결
+        // 새로운 REST 연결을 처리한다
         if (FD_ISSET(passiveSockREST, &readSet)) {
             std::cout << "Waiting for a REST connection" << std::endl;
             struct sockaddr_in clientAddr {};
@@ -834,7 +838,8 @@ int main() {
                 return 1;
             } else {
                 shared_ptr<Client> newClient(new Client(activeSock, c));
-                newClient->isREST = true; // REST Client임을 알린다.
+                // REST Client임을 알린다.
+                newClient->isREST = true;
                 activeClients.insert(make_pair(activeSock, newClient));
 
                 char strBuf[1024];
@@ -865,15 +870,12 @@ int main() {
                 continue;
             }
 
-            // 읽기 이벤트가 발생하는 소켓의 경우 recv() 를 처리한다.
-            // 주의: 아래는 여전히 recv() 에 의해 blocking 이 발생할 수 있다.
-            //       우리는 이를 producer-consumer 형태로 바꿀 것이다.
+            // 만약 읽기 이벤트가 발생한 경우
             if (FD_ISSET(activeSock, &readSet)) {
-                // 이제 다시 select 대상이 되지 않도록 client 의 flag 를 켜준다.
+                // recv를 처리하는 동안 select 대상이 되지 않도록 client 의 flag 를 켜준다.
                 client->doingRecv.store(true);
 
-                // 해당 client 를 job queue 에 넣자. lock_guard 를 써도 되고 unique_lock 을 써도 된다.
-                // lock 걸리는 범위를 명시적으로 제어하기 위해서 새로 scope 을 열어준다.
+                // lock_guard를 위한 scope를 전개한 뒤 해당 client 를 job queue 에 넣는다.
                 {
                     lock_guard<mutex> lg(jobQueueMutex);
 
@@ -887,8 +889,6 @@ int main() {
                     if (wasEmpty) {
                         jobQueueFilledCv.notify_one();
                     }
-
-                    // lock_guard 는 scope 이 벗어날 때 풀릴 것이다.
                 }
             }
         }
